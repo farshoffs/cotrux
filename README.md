@@ -23,7 +23,7 @@ Use Cotrux only on computers you own or are authorized to control.
 
 ## Run locally
 
-Requirements: Node.js 20+.
+Requirements: Node.js 22.12+.
 
     npm install
 
@@ -44,7 +44,7 @@ Build the controller:
 
     npm run build:controller
 
-apps/controller/dist is a static PWA and can be deployed to GitHub Pages, Cloudflare Pages, Netlify, etc. The included GitHub Pages workflow publishes it automatically after pushes to main.
+apps/controller/dist is a static PWA and can be deployed to GitHub Pages, Cloudflare Pages, Netlify, etc. The included GitHub Pages workflow publishes after pushes to main once GitHub Pages has been enabled for the repository with GitHub Actions as its source.
 
 For production, put the signaling service behind HTTPS/WSS and enter that WSS URL in Controller Settings.
 
