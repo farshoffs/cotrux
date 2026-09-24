@@ -131,7 +131,13 @@ For a production macOS/Windows release, add proper code-signing/notarization cre
 
 ## GitHub Pages
 
-An optional Pages workflow remains in `.github/workflows/pages.yml`, but it is manual because GitHub requires Pages to be enabled at repository level first. The unified Cotrux Server deployment is the recommended setup because it hosts the PWA and WebSocket endpoint together.
+The controller PWA is deployed at:
+
+    https://farshoffs.github.io/cotrux/
+
+GitHub Pages is static hosting, so it serves the controller UI but cannot run Cotrux's long-lived WebSocket signaling service. Enter your deployed `wss://...` Cotrux Server address in **Network settings**.
+
+For the simplest production setup, deploy the included `render.yaml` (or the Docker image) so the PWA and `/ws` signaling endpoint live on one HTTPS hostname.
 
 ## Security model
 
