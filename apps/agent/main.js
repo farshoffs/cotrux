@@ -579,11 +579,22 @@ async function applyControl(event) {
   if (event.kind === "move") {
     const display = screen.getPrimaryDisplay();
     const bounds = display.bounds;
+    const scale = Number(display.scaleFactor || 1);
     const x = Math.max(0, Math.min(1, Number(event.x)));
     const y = Math.max(0, Math.min(1, Number(event.y)));
+
+    // Electron display bounds are device-independent pixels (DIP), while
+    // nut-js uses native screen coordinates on Windows. Convert to physical
+    // pixels so 125%/150% Windows scaling does not truncate the reachable
+    // area of the remote cursor.
+    const physicalX = Math.round(bounds.x * scale);
+    const physicalY = Math.round(bounds.y * scale);
+    const physicalWidth = Math.max(1, Math.round(bounds.width * scale));
+    const physicalHeight = Math.max(1, Math.round(bounds.height * scale));
+
     await mouse.setPosition(new Point(
-      Math.round(bounds.x + x * Math.max(1, bounds.width - 1)),
-      Math.round(bounds.y + y * Math.max(1, bounds.height - 1))
+      physicalX + Math.round(x * Math.max(1, physicalWidth - 1)),
+      physicalY + Math.round(y * Math.max(1, physicalHeight - 1))
     ));
     return;
   }
@@ -676,6 +687,8 @@ app.whenReady().then(() => {
       id: display.id,
       width: display.bounds.width,
       height: display.bounds.height,
+      physicalWidth: Math.round(display.bounds.width * Number(display.scaleFactor || 1)),
+      physicalHeight: Math.round(display.bounds.height * Number(display.scaleFactor || 1)),
       scaleFactor: display.scaleFactor
     };
   });
