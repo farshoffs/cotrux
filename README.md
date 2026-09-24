@@ -211,3 +211,21 @@ The desktop build workflow publishes a fixed latest Windows installer asset:
     https://github.com/farshoffs/cotrux/releases/download/desktop-latest/Cotrux-Setup.exe
 
 The GitHub Pages controller exposes this as **Download Cotrux for Windows**. Each successful main-branch desktop build replaces the `desktop-latest` release so the button stays current.
+
+
+## Automatic guest provisioning
+
+After the Persistent Workspace VM has Windows installed and a user account is signed in, the Cotrux host GUI can provision the guest automatically.
+
+The host asks for the guest Windows username and password once. The password is used only for that provisioning session and is not written to Cotrux workspace state. Cotrux then:
+
+- connects to the local Hyper-V guest with PowerShell Direct,
+- downloads the current stable `Cotrux-Setup.exe` on the host,
+- copies the installer into the VM,
+- installs Cotrux silently inside the guest,
+- creates a guest logon task for Cotrux,
+- preconfigures the production Cotrux server,
+- enables unattended access for the guest Cotrux instance,
+- assigns a persistent first-pairing PIN that the host GUI displays.
+
+The guest then appears as a separate Cotrux computer after the controller pairs with that PIN once. The VM remains persistent through its VHDX and Hyper-V saved state.
