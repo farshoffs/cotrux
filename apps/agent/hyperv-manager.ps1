@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("status","enable","create","start","save","provision","prepare-bootstrap")]
+  [ValidateSet("status","enable","create","start","save","provision","prepare-bootstrap","validate-iso","repair-boot")]
   [string]$Action = "status",
   [string]$VmName = "Cotrux Persistent Workspace",
   [string]$VhdPath = "",
@@ -67,9 +67,69 @@ function HyperV-Available {
   return [bool](Get-Command Get-VM -ErrorAction SilentlyContinue)
 }
 
+function Test-WindowsInstallerIso([string]$ImagePath) {
+  if (-not $ImagePath -or -not (Test-Path $ImagePath)) {
+    return @{ ok = $false; error = "ISO file not found." }
+  }
+
+  $mountedHere = $false
+  try {
+    $image = Get-DiskImage -ImagePath $ImagePath -ErrorAction SilentlyContinue
+    if (-not $image -or -not $image.Attached) {
+      $image = Mount-DiskImage -ImagePath $ImagePath -PassThru
+      $mountedHere = $true
+      Start-Sleep -Milliseconds 500
+    }
+
+    $volumes = $image | Get-Volume
+    $volume = $volumes | Where-Object { $_.DriveLetter } | Select-Object -First 1
+    if (-not $volume) {
+      return @{ ok = $false; error = "ISO mounted, but Windows could not read a drive letter from it." }
+    }
+
+    $root = "$($volume.DriveLetter):\"
+    $bootX64 = Join-Path $root "efi\boot\bootx64.efi"
+    $bootArm64 = Join-Path $root "efi\boot\bootaa64.efi"
+    $bootWim = Join-Path $root "sources\boot.wim"
+
+    if (-not (Test-Path $bootX64)) {
+      if (Test-Path $bootArm64) {
+        return @{ ok = $false; error = "This looks like an ARM64 Windows ISO. Cotrux Persistent Workspace currently requires an x64 Windows ISO." }
+      }
+      return @{ ok = $false; error = "This ISO does not contain the x64 UEFI boot loader (EFI\\BOOT\\BOOTX64.EFI)." }
+    }
+
+    if (-not (Test-Path $bootWim)) {
+      return @{ ok = $false; error = "This ISO does not look like standard Windows installation media because sources\\boot.wim is missing." }
+    }
+
+    return @{
+      ok = $true
+      architecture = "x64"
+      drive = $volume.DriveLetter
+      bootLoader = $bootX64
+      message = "Valid x64 Windows UEFI installation ISO."
+    }
+  } catch {
+    return @{ ok = $false; error = $_.Exception.Message }
+  } finally {
+    if ($mountedHere) {
+      Dismount-DiskImage -ImagePath $ImagePath -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 try {
   $edition = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -ErrorAction SilentlyContinue).EditionID
   $hyperv = HyperV-Available
+
+  if ($Action -eq "validate-iso") {
+    $check = Test-WindowsInstallerIso $IsoPath
+    Write-Result $check
+    if (-not $check.ok) { exit 1 }
+    exit
+  }
+
 
   if ($Action -eq "status") {
     if (-not $hyperv) {
@@ -130,6 +190,8 @@ try {
     if (-not (Is-Admin)) { Relaunch-Elevated }
     if (-not $VhdPath) { throw "VHDX path is required." }
     if (-not $IsoPath -or -not (Test-Path $IsoPath)) { throw "A valid Windows ISO is required." }
+    $isoCheck = Test-WindowsInstallerIso $IsoPath
+    if (-not $isoCheck.ok) { throw ("The selected ISO failed Cotrux validation. " + $isoCheck.error) }
 
     $existing = Get-VM -Name $VmName -ErrorAction SilentlyContinue
     if ($existing) {
@@ -179,6 +241,43 @@ try {
 
   $vm = Get-VM -Name $VmName -ErrorAction SilentlyContinue
   if (-not $vm) { throw "Persistent workspace has not been created yet." }
+
+  if ($Action -eq "repair-boot") {
+    if (-not (Is-Admin)) { Relaunch-Elevated }
+    if (-not $IsoPath -or -not (Test-Path $IsoPath)) { throw "Choose a valid Windows ISO." }
+
+    $isoCheck = Test-WindowsInstallerIso $IsoPath
+    if (-not $isoCheck.ok) { throw ("The selected ISO cannot boot this workspace. " + $isoCheck.error) }
+
+    if ($vm.State -eq "Running") {
+      Stop-VM -Name $VmName -TurnOff -Force
+      Start-Sleep -Seconds 1
+    } elseif ($vm.State -eq "Saved") {
+      Remove-VMSavedState -VMName $VmName
+    }
+
+    $dvd = Get-VMDvdDrive -VMName $VmName | Select-Object -First 1
+    if ($dvd) {
+      Set-VMDvdDrive -VMName $VmName -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $IsoPath
+      $dvd = Get-VMDvdDrive -VMName $VmName | Select-Object -First 1
+    } else {
+      $dvd = Add-VMDvdDrive -VMName $VmName -Path $IsoPath -Passthru
+    }
+
+    Set-VMFirmware -VMName $VmName -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows
+    Set-VMFirmware -VMName $VmName -FirstBootDevice $dvd
+
+    Start-VM -Name $VmName | Out-Null
+
+    Write-Result @{
+      ok = $true
+      repaired = $true
+      running = $true
+      isoPath = $IsoPath
+      message = "Windows ISO validated, reattached, and set as the first UEFI boot device."
+    }
+    exit
+  }
 
   if ($Action -eq "start") {
     if ($vm.State -ne "Running") { Start-VM -Name $VmName | Out-Null }
