@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("status","enable","create","start","save")]
+  [ValidateSet("status","enable","create","start","save","provision")]
   [string]$Action = "status",
   [string]$VmName = "Cotrux Persistent Workspace",
   [string]$VhdPath = "",
@@ -7,6 +7,10 @@ param(
   [int]$MemoryMB = 4096,
   [int]$MaxMemoryMB = 8192,
   [int]$Processors = 2,
+  [string]$GuestUsername = "",
+  [string]$SignalUrl = "",
+  [string]$PairingPin = "",
+  [string]$InstallerUrl = "",
   [string]$ResultPath = ""
 )
 
@@ -46,6 +50,10 @@ function Relaunch-Elevated {
     "-MemoryMB", [string]$MemoryMB,
     "-MaxMemoryMB", [string]$MaxMemoryMB,
     "-Processors", [string]$Processors,
+    "-GuestUsername", (Q $GuestUsername),
+    "-SignalUrl", (Q $SignalUrl),
+    "-PairingPin", (Q $PairingPin),
+    "-InstallerUrl", (Q $InstallerUrl),
     "-ResultPath", (Q $ResultPath)
   )
   $p = Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList ($parts -join " ") -WindowStyle Hidden -Wait -PassThru
@@ -183,6 +191,105 @@ try {
     if ($vm.State -eq "Running") { Save-VM -Name $VmName }
     $vm = Get-VM -Name $VmName
     Write-Result @{ ok = $true; exists = $true; running = $false; state = [string]$vm.State; message = "Workspace saved. VHDX data and VM state were preserved." }
+    exit
+  }
+
+  if ($Action -eq "provision") {
+    if (-not (Is-Admin)) { Relaunch-Elevated }
+    if (-not $GuestUsername) { throw "Guest Windows username is required." }
+    if (-not $env:COTRUX_GUEST_PASSWORD) { throw "Guest Windows password is required." }
+    if (-not $InstallerUrl -or -not $InstallerUrl.StartsWith("https://github.com/farshoffs/cotrux/")) {
+      throw "The Cotrux installer URL is invalid."
+    }
+    if ($PairingPin -notmatch "^\d{6}$") { throw "A valid six-digit workspace pairing PIN is required." }
+    if (-not $SignalUrl) { throw "Cotrux signaling URL is required." }
+
+    if ($vm.State -ne "Running") {
+      Start-VM -Name $VmName | Out-Null
+      Start-Sleep -Seconds 3
+    }
+
+    try { Enable-VMIntegrationService -VMName $VmName -Name "Guest Service Interface" -ErrorAction SilentlyContinue } catch {}
+
+    $secure = ConvertTo-SecureString $env:COTRUX_GUEST_PASSWORD -AsPlainText -Force
+    $credential = New-Object System.Management.Automation.PSCredential($GuestUsername, $secure)
+
+    $session = $null
+    $lastSessionError = $null
+    for ($i = 0; $i -lt 20; $i++) {
+      try {
+        $session = New-PSSession -VMName $VmName -Credential $credential -ErrorAction Stop
+        if ($session) { break }
+      } catch {
+        $lastSessionError = $_.Exception.Message
+        Start-Sleep -Seconds 3
+      }
+    }
+    if (-not $session) {
+      throw "Could not connect to Windows inside the workspace. Make sure Windows setup is finished and the username/password are correct. $lastSessionError"
+    }
+
+    $tempInstaller = Join-Path $env:TEMP ("Cotrux-Setup-" + [guid]::NewGuid().ToString("N") + ".exe")
+    try {
+      Invoke-WebRequest -Uri $InstallerUrl -OutFile $tempInstaller -UseBasicParsing
+      if (-not (Test-Path $tempInstaller) -or (Get-Item $tempInstaller).Length -lt 10MB) {
+        throw "Downloaded Cotrux installer is incomplete."
+      }
+
+      Copy-Item -ToSession $session -Path $tempInstaller -Destination "C:\CotruxProvision\Cotrux-Setup.exe" -Force
+
+      $guestResult = Invoke-Command -Session $session -ArgumentList $SignalUrl,$PairingPin -ScriptBlock {
+        param($CotruxSignalUrl,$CotruxPairingPin)
+
+        $ErrorActionPreference = "Stop"
+        Get-Process -Name "Cotrux" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+        Start-Process -FilePath "C:\CotruxProvision\Cotrux-Setup.exe" -ArgumentList "/S" -Wait
+
+        $candidates = @(
+          (Join-Path $env:LOCALAPPDATA "Programs\Cotrux\Cotrux.exe"),
+          (Join-Path $env:LOCALAPPDATA "Programs\cotrux\Cotrux.exe"),
+          (Join-Path $env:ProgramFiles "Cotrux\Cotrux.exe")
+        )
+        $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $exe) {
+          $exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs") -Filter "Cotrux.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+        }
+        if (-not $exe) { throw "Cotrux installed, but Cotrux.exe could not be located." }
+
+        $encodedSignal = [uri]::EscapeDataString($CotruxSignalUrl)
+        $encodedName = [uri]::EscapeDataString("Cotrux Persistent Workspace")
+        $arguments = "--background-workspace --workspace-bootstrap --hidden --signal-url=$encodedSignal --pairing-pin=$CotruxPairingPin --display-name=$encodedName"
+
+        $taskName = "Cotrux Persistent Workspace Agent"
+        $action = New-ScheduledTaskAction -Execute $exe -Argument $arguments
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User ("$env:USERDOMAIN\$env:USERNAME")
+        $principal = New-ScheduledTaskPrincipal -UserId ("$env:USERDOMAIN\$env:USERNAME") -LogonType Interactive -RunLevel Limited
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+
+        try { Start-ScheduledTask -TaskName $taskName } catch {}
+
+        [pscustomobject]@{
+          ok = $true
+          exePath = $exe
+          taskName = $taskName
+          user = "$env:USERDOMAIN\$env:USERNAME"
+        }
+      }
+
+      Write-Result @{
+        ok = $true
+        provisioned = $true
+        guestUser = [string]$guestResult.user
+        exePath = [string]$guestResult.exePath
+        taskName = [string]$guestResult.taskName
+        message = "Cotrux installed and configured inside the workspace. The guest password was used only for this provisioning session and was not saved by Cotrux."
+      }
+    } finally {
+      if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue }
+      Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
+      Remove-Item Env:COTRUX_GUEST_PASSWORD -ErrorAction SilentlyContinue
+    }
     exit
   }
 } catch {
