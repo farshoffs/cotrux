@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, Menu, nativeImage, screen, session, Tray } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from "electron";
 import { mouse, keyboard, Button, Key, Point } from "@nut-tree-fork/nut-js";
 import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
@@ -115,308 +115,192 @@ function setStartupState(enabled) {
   return getStartupState();
 }
 
-function generatePairingPin() {
-  const bytes = crypto.randomBytes(4);
-  return String(bytes.readUInt32BE(0) % 1000000).padStart(6, "0");
-}
-
 function workspaceRoot() {
-  return path.join(app.getPath("userData"), "BackgroundWorkspace");
-}
-
-function workspaceDataDir() {
-  return path.join(workspaceRoot(), "Data");
-}
-
-function workspaceConfigPath() {
-  return path.join(workspaceDataDir(), "cotrux-config.json");
+  return path.join(app.getPath("home"), "Cotrux Workspaces", "Persistent Workspace");
 }
 
 function workspaceStatePath() {
   return path.join(workspaceRoot(), "workspace-state.json");
 }
 
+const WORKSPACE_VM_NAME = "Cotrux Persistent Workspace";
+
 function ensureWorkspaceState() {
   const existing = readJsonFile(workspaceStatePath(), {});
   const state = {
-    sandboxId: typeof existing.sandboxId === "string" ? existing.sandboxId : "",
-    deviceId: typeof existing.deviceId === "string" && existing.deviceId ? existing.deviceId : crypto.randomUUID(),
-    pairingPin: /^\d{6}$/.test(String(existing.pairingPin || "")) ? String(existing.pairingPin) : generatePairingPin(),
+    vmName: WORKSPACE_VM_NAME,
+    isoPath: typeof existing.isoPath === "string" ? existing.isoPath : "",
+    vhdPath: typeof existing.vhdPath === "string" && existing.vhdPath
+      ? existing.vhdPath
+      : path.join(workspaceRoot(), "Cotrux-Persistent-Workspace.vhdx"),
     createdAt: Number(existing.createdAt || Date.now())
   };
   writeJsonFile(workspaceStatePath(), state);
   return state;
 }
 
-function xmlEscape(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
+function hypervHelperPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "hyperv-manager.ps1")
+    : path.join(__dirname, "hyperv-manager.ps1");
 }
 
-async function hasWindowsSandboxCli() {
-  if (process.platform !== "win32" || isBackgroundWorkspace) return false;
+async function runHyperVHelper(action, extra = {}) {
+  const resultPath = path.join(app.getPath("temp"), "cotrux-hyperv-" + crypto.randomUUID() + ".json");
+  const state = ensureWorkspaceState();
+  const totalMemoryMB = Math.floor(os.totalmem() / 1024 / 1024);
+  const startupMemoryMB = Math.max(4096, Math.min(8192, Math.floor(totalMemoryMB / 3)));
+  const maxMemoryMB = Math.max(startupMemoryMB, Math.min(12288, Math.floor(totalMemoryMB / 2)));
+  const processors = Math.max(2, Math.min(4, Math.floor(os.cpus().length / 2) || 2));
+
+  const args = [
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", hypervHelperPath(),
+    "-Action", action,
+    "-VmName", state.vmName,
+    "-VhdPath", state.vhdPath,
+    "-IsoPath", extra.isoPath ?? state.isoPath,
+    "-MemoryMB", String(startupMemoryMB),
+    "-MaxMemoryMB", String(maxMemoryMB),
+    "-Processors", String(processors),
+    "-ResultPath", resultPath
+  ];
+
   try {
-    await execFileAsync("wsb.exe", ["--help"], {
+    await execFileAsync("powershell.exe", args, {
       windowsHide: true,
-      timeout: 7000,
-      encoding: "utf8"
+      timeout: action === "create" || action === "enable" ? 10 * 60 * 1000 : 90 * 1000,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024
     });
-    return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (!fs.existsSync(resultPath)) {
+      return { ok: false, error: String(error?.stderr || error?.message || error).slice(0, 1200) };
+    }
+  }
+
+  try {
+    return readJsonFile(resultPath, { ok: false, error: "Hyper-V helper returned no result." });
+  } finally {
+    try { fs.rmSync(resultPath, { force: true }); } catch {}
   }
 }
 
-function syncWorkspaceConfig() {
-  const hostConfig = readConfig();
-  const state = ensureWorkspaceState();
-  const existing = readJsonFile(workspaceConfigPath(), {});
-
-  const workspaceConfig = {
-    ...existing,
-    deviceId: state.deviceId,
-    signalUrl: hostConfig.signalUrl || DEFAULT_SIGNAL_URL,
-    turnUrl: hostConfig.turnUrl || "",
-    turnUser: hostConfig.turnUser || "",
-    turnPass: hostConfig.turnPass || "",
-    unattendedEnabled: true,
-    trustedDevices: Array.isArray(existing.trustedDevices) ? existing.trustedDevices : [],
-    backgroundWorkspace: true,
-    pairingPin: /^\d{6}$/.test(String(existing.pairingPin || ""))
-      ? String(existing.pairingPin)
-      : state.pairingPin,
-    displayName: "Background Workspace"
-  };
-
-  state.pairingPin = workspaceConfig.pairingPin;
-  writeJsonFile(workspaceStatePath(), state);
-  writeJsonFile(workspaceConfigPath(), workspaceConfig);
-  return { state, workspaceConfig };
+function editionSupportsHyperV(edition = "") {
+  return /professional|enterprise|education|workstation|server/i.test(String(edition));
 }
 
 async function getBackgroundWorkspaceStatus() {
   if (isBackgroundWorkspace) {
-    return {
-      supported: false,
-      running: false,
-      workspaceMode: true,
-      reason: "Background Workspace is already running inside the isolated session."
-    };
+    return { supported: false, configured: false, running: false, workspaceMode: true, reason: "This Cotrux instance is already running inside a workspace." };
   }
-
   if (process.platform !== "win32") {
+    return { supported: false, configured: false, running: false, reason: "Persistent Workspace is currently available on Windows only." };
+  }
+
+  const state = ensureWorkspaceState();
+  const hv = await runHyperVHelper("status");
+  const editionSupported = editionSupportsHyperV(hv.edition);
+
+  if (!hv.hypervEnabled) {
     return {
-      supported: false,
+      supported: editionSupported,
+      hypervEnabled: false,
+      configured: false,
       running: false,
-      reason: "Background Workspace is currently available on Windows only."
+      isoPath: state.isoPath,
+      dataPath: state.vhdPath,
+      edition: hv.edition || "",
+      reason: editionSupported
+        ? "Hyper-V is not enabled yet. Cotrux can enable it with a Windows UAC prompt."
+        : "This Windows edition does not provide Client Hyper-V. Windows Pro, Enterprise or Education is required."
     };
-  }
-
-  if (!app.isPackaged) {
-    return {
-      supported: false,
-      running: false,
-      reason: "Install a packaged Cotrux desktop build to use Background Workspace."
-    };
-  }
-
-  const cliAvailable = await hasWindowsSandboxCli();
-  if (!cliAvailable) {
-    return {
-      supported: false,
-      running: false,
-      reason: "Requires Windows 11 24H2 or newer with Windows Sandbox enabled."
-    };
-  }
-
-  const { state, workspaceConfig } = syncWorkspaceConfig();
-  let running = false;
-
-  if (state.sandboxId) {
-    try {
-      const { stdout = "" } = await execFileAsync("wsb.exe", ["list", "--raw"], {
-        windowsHide: true,
-        timeout: 10000,
-        encoding: "utf8"
-      });
-      running = String(stdout).toLowerCase().includes(state.sandboxId.toLowerCase());
-    } catch {
-      running = false;
-    }
-  }
-
-  if (!running && state.sandboxId) {
-    state.sandboxId = "";
-    writeJsonFile(workspaceStatePath(), state);
   }
 
   return {
     supported: true,
-    running,
-    sandboxId: running ? state.sandboxId : "",
-    deviceId: state.deviceId,
-    pairingPin: workspaceConfig.pairingPin,
-    name: workspaceConfig.displayName || "Background Workspace"
+    hypervEnabled: true,
+    configured: Boolean(hv.exists),
+    running: Boolean(hv.running),
+    state: hv.state || "Unknown",
+    vmName: state.vmName,
+    isoPath: state.isoPath,
+    dataPath: state.vhdPath,
+    automaticStartAction: hv.automaticStartAction || "",
+    automaticStopAction: hv.automaticStopAction || "",
+    edition: hv.edition || "",
+    error: hv.ok === false ? hv.error : "",
+    reason: hv.exists
+      ? (hv.running ? "Persistent Workspace is running independently of the physical desktop." : "Persistent Workspace is saved. Its VHDX, apps and files are still intact.")
+      : (state.isoPath ? "Ready to create the persistent VM." : "Choose a Windows ISO once, then Cotrux will create a persistent 100 GB VHDX workspace.")
   };
 }
 
-function extractSandboxId(stdout) {
-  const raw = String(stdout || "").trim();
-  if (!raw) return "";
+async function enableHyperV() {
+  if (process.platform !== "win32") return getBackgroundWorkspaceStatus();
+  const result = await runHyperVHelper("enable");
+  return { ...(await getBackgroundWorkspaceStatus()), restartNeeded: Boolean(result.restartNeeded), message: result.message || result.error || "" };
+}
 
-  try {
-    const parsed = JSON.parse(raw);
-    const stack = [parsed];
-    while (stack.length) {
-      const item = stack.pop();
-      if (typeof item === "string") {
-        const match = item.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-        if (match) return match[0];
-      } else if (item && typeof item === "object") {
-        stack.push(...Object.values(item));
-      }
-    }
-  } catch {}
-
-  return raw.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || "";
+async function chooseWorkspaceIso() {
+  if (process.platform !== "win32") return getBackgroundWorkspaceStatus();
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: "Choose Windows ISO for Cotrux Persistent Workspace",
+    buttonLabel: "Use this ISO",
+    properties: ["openFile"],
+    filters: [{ name: "Windows ISO", extensions: ["iso"] }]
+  });
+  if (!selected.canceled && selected.filePaths[0]) {
+    const state = ensureWorkspaceState();
+    state.isoPath = selected.filePaths[0];
+    writeJsonFile(workspaceStatePath(), state);
+  }
+  return getBackgroundWorkspaceStatus();
 }
 
 async function startBackgroundWorkspace() {
   const status = await getBackgroundWorkspaceStatus();
-  if (!status.supported) return status;
-  if (status.running) return status;
+  if (!status.supported || !status.hypervEnabled) return status;
+  const state = ensureWorkspaceState();
 
-  const { state, workspaceConfig } = syncWorkspaceConfig();
-  const appDir = path.dirname(process.execPath);
-  const root = workspaceRoot();
-  fs.mkdirSync(workspaceDataDir(), { recursive: true });
-
-  const configXml = [
-    "<Configuration>",
-    "  <Networking>Enable</Networking>",
-    "  <ClipboardRedirection>Disable</ClipboardRedirection>",
-    "  <PrinterRedirection>Disable</PrinterRedirection>",
-    "  <AudioInput>Disable</AudioInput>",
-    "  <VideoInput>Disable</VideoInput>",
-    "  <MappedFolders>",
-    "    <MappedFolder>",
-    "      <HostFolder>" + xmlEscape(appDir) + "</HostFolder>",
-    "      <SandboxFolder>C:\\CotruxApp</SandboxFolder>",
-    "      <ReadOnly>true</ReadOnly>",
-    "    </MappedFolder>",
-    "    <MappedFolder>",
-    "      <HostFolder>" + xmlEscape(root) + "</HostFolder>",
-    "      <SandboxFolder>C:\\CotruxWorkspace</SandboxFolder>",
-    "      <ReadOnly>false</ReadOnly>",
-    "    </MappedFolder>",
-    "  </MappedFolders>",
-    "  <LogonCommand>",
-    "    <Command>C:\\CotruxApp\\Cotrux.exe --background-workspace --data-dir=C:\\CotruxWorkspace\\Data --hidden</Command>",
-    "  </LogonCommand>",
-    "  <MemoryInMB>4096</MemoryInMB>",
-    "</Configuration>"
-  ].join("");
-
-  try {
-    const { stdout = "" } = await execFileAsync("wsb.exe", [
-      "start",
-      "--config",
-      configXml,
-      "--raw"
-    ], {
-      windowsHide: true,
-      timeout: 45000,
-      encoding: "utf8",
-      maxBuffer: 1024 * 1024
-    });
-
-    const sandboxId = extractSandboxId(stdout);
-    if (!sandboxId) {
-      return {
-        ...status,
-        running: false,
-        error: "Windows Sandbox started but Cotrux could not read its session ID."
-      };
-    }
-
-    state.sandboxId = sandboxId;
-    state.pairingPin = workspaceConfig.pairingPin;
-    writeJsonFile(workspaceStatePath(), state);
-
-    return {
-      supported: true,
-      running: true,
-      sandboxId,
-      deviceId: state.deviceId,
-      pairingPin: workspaceConfig.pairingPin,
-      name: workspaceConfig.displayName || "Background Workspace"
-    };
-  } catch (error) {
-    return {
-      ...status,
-      running: false,
-      error: String(error?.stderr || error?.message || error).slice(0, 800)
-    };
+  if (!status.configured) {
+    if (!state.isoPath || !fs.existsSync(state.isoPath)) return { ...status, error: "Choose a valid Windows ISO before creating the workspace." };
+    const result = await runHyperVHelper("create", { isoPath: state.isoPath });
+    return { ...(await getBackgroundWorkspaceStatus()), operation: result };
   }
+
+  if (!status.running) {
+    const result = await runHyperVHelper("start");
+    return { ...(await getBackgroundWorkspaceStatus()), operation: result };
+  }
+
+  return status;
 }
 
 async function stopBackgroundWorkspace() {
-  const state = ensureWorkspaceState();
-  if (!state.sandboxId) return getBackgroundWorkspaceStatus();
-
-  try {
-    await execFileAsync("wsb.exe", ["stop", "--id", state.sandboxId, "--raw"], {
-      windowsHide: true,
-      timeout: 30000,
-      encoding: "utf8"
-    });
-  } catch (error) {
-    const current = await getBackgroundWorkspaceStatus();
-    if (current.running) {
-      return { ...current, error: String(error?.stderr || error?.message || error).slice(0, 800) };
-    }
-  }
-
-  state.sandboxId = "";
-  writeJsonFile(workspaceStatePath(), state);
-  return getBackgroundWorkspaceStatus();
+  const status = await getBackgroundWorkspaceStatus();
+  if (!status.configured || !status.running) return status;
+  const result = await runHyperVHelper("save");
+  return { ...(await getBackgroundWorkspaceStatus()), operation: result };
 }
 
 async function connectBackgroundWorkspace() {
   const status = await getBackgroundWorkspaceStatus();
-  if (!status.running || !status.sandboxId) return { ...status, opened: false };
-
+  if (!status.configured) return { ...status, opened: false };
   try {
-    const child = spawn("wsb.exe", ["connect", "--id", status.sandboxId], {
-      windowsHide: true,
-      detached: true,
-      stdio: "ignore"
-    });
+    if (!status.running) await runHyperVHelper("start");
+    const child = spawn("vmconnect.exe", ["localhost", WORKSPACE_VM_NAME], { windowsHide: false, detached: true, stdio: "ignore" });
     child.unref();
-    return { ...status, opened: true };
+    return { ...(await getBackgroundWorkspaceStatus()), opened: true };
   } catch (error) {
     return { ...status, opened: false, error: String(error?.message || error).slice(0, 800) };
   }
 }
 
-function openWindowsFeatures() {
-  if (process.platform !== "win32") return { ok: false };
-  try {
-    const child = spawn("OptionalFeatures.exe", [], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: false
-    });
-    child.unref();
-    return { ok: true };
-  } catch {
-    return { ok: false };
-  }
+async function openWindowsDownload() {
+  await shell.openExternal("https://www.microsoft.com/software-download/windows11");
+  return { ok: true };
 }
+
 
 function createWindow() {
   const hiddenStartup = process.argv.includes("--hidden") || isBackgroundWorkspace;
@@ -633,7 +517,9 @@ app.whenReady().then(() => {
   ipcMain.handle("cotrux:workspace-start", startBackgroundWorkspace);
   ipcMain.handle("cotrux:workspace-stop", stopBackgroundWorkspace);
   ipcMain.handle("cotrux:workspace-connect", connectBackgroundWorkspace);
-  ipcMain.handle("cotrux:windows-features", openWindowsFeatures);
+  ipcMain.handle("cotrux:workspace-enable-hyperv", enableHyperV);
+  ipcMain.handle("cotrux:workspace-choose-iso", chooseWorkspaceIso);
+  ipcMain.handle("cotrux:workspace-download-windows", openWindowsDownload);
 
   createWindow();
   createTray();
