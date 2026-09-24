@@ -27,6 +27,7 @@ const els = {
   workspaceGuestUser: $("#workspaceGuestUser"),
   workspaceGuestPass: $("#workspaceGuestPass"),
   provisionWorkspaceBtn: $("#provisionWorkspaceBtn"),
+  prepareGuestSetupBtn: $("#prepareGuestSetupBtn"),
   workspacePairing: $("#workspacePairing"),
   workspacePairingPin: $("#workspacePairingPin"),
   accessCard: $("#accessCard"),
@@ -254,14 +255,16 @@ async function renderWorkspaceStatus(status) {
     ? "Cotrux is provisioned inside the workspace"
     : "Provision Cotrux automatically";
   els.workspaceProvisionText.textContent = status.provisioned
-    ? "Re-enter the guest password only if you want to reinstall/update Cotrux. The password is never stored."
-    : "Use the Windows account you created inside the VM. Cotrux uses it once through Hyper-V PowerShell Direct and does not save the password.";
+    ? "Cotrux is configured in the VM. Re-enter the real account password only if you want to reinstall/update it."
+    : status.bootstrapPrepared
+      ? "Guest setup is ready. Open the VM and double-click “Finish Cotrux Setup” on its desktop. No Windows password is required for this fallback."
+      : "Use the actual Windows account password, not the Windows Hello PIN. If you only use a PIN or have no password, choose the fallback button below.";
   els.provisionWorkspaceBtn.textContent = status.provisioned
     ? "Reinstall / Update Cotrux"
     : "Install & Configure Cotrux";
 
   const pin = String(status.pairingPin || "");
-  els.workspacePairing.classList.toggle("hidden", !status.provisioned || !/^\d{6}$/.test(pin));
+  els.workspacePairing.classList.toggle("hidden", !(status.provisioned || status.bootstrapPrepared) || !/^\d{6}$/.test(pin));
   if (/^\d{6}$/.test(pin)) {
     els.workspacePairingPin.textContent = pin.slice(0, 3) + " " + pin.slice(3);
   }
@@ -683,7 +686,7 @@ els.provisionWorkspaceBtn.addEventListener("click", async () => {
   const password = els.workspaceGuestPass.value;
 
   if (!username || !password) {
-    setState("Enter the workspace Windows username and password", "error");
+    setState("Use the Windows account password — Windows Hello PIN will not work. Or choose the PIN/no-password fallback.", "error");
     els.workspaceGuestPass.focus();
     return;
   }
@@ -711,6 +714,29 @@ els.provisionWorkspaceBtn.addEventListener("click", async () => {
     if (!els.provisionWorkspaceBtn.textContent || els.provisionWorkspaceBtn.textContent === "Installing inside workspace…") {
       els.provisionWorkspaceBtn.textContent = previousText;
     }
+  }
+});
+
+els.prepareGuestSetupBtn.addEventListener("click", async () => {
+  els.prepareGuestSetupBtn.disabled = true;
+  const oldText = els.prepareGuestSetupBtn.textContent;
+  els.prepareGuestSetupBtn.textContent = "Preparing one-click setup…";
+  setState("Preparing guest setup without password", "pending");
+
+  try {
+    const status = await window.cotrux.workspacePrepareBootstrap();
+    await renderWorkspaceStatus(status);
+
+    if (status.bootstrapPrepared && !status.error) {
+      setState("Open VM · double-click “Finish Cotrux Setup” on the Windows desktop", "ready");
+    } else {
+      setState(status.error || status.bootstrapResult?.error || "Could not prepare guest setup", "error");
+    }
+  } catch (error) {
+    setState(String(error?.message || error || "Could not prepare guest setup"), "error");
+  } finally {
+    els.prepareGuestSetupBtn.disabled = false;
+    els.prepareGuestSetupBtn.textContent = oldText;
   }
 });
 
