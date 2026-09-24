@@ -8,9 +8,15 @@ const els = {
   workspaceBadge: $("#workspaceBadge"),
   workspaceReady: $("#workspaceReady"),
   workspaceSetup: $("#workspaceSetup"),
-  workspacePin: $("#workspacePin"),
   workspaceRequirement: $("#workspaceRequirement"),
+  workspaceStateText: $("#workspaceStateText"),
+  workspaceDataPath: $("#workspaceDataPath"),
+  workspaceIsoTools: $("#workspaceIsoTools"),
+  workspaceIsoName: $("#workspaceIsoName"),
   startWorkspaceBtn: $("#startWorkspaceBtn"),
+  resumeWorkspaceBtn: $("#resumeWorkspaceBtn"),
+  chooseWorkspaceIsoBtn: $("#chooseWorkspaceIsoBtn"),
+  downloadWindowsBtn: $("#downloadWindowsBtn"),
   openWorkspaceBtn: $("#openWorkspaceBtn"),
   stopWorkspaceBtn: $("#stopWorkspaceBtn"),
   windowsFeaturesBtn: $("#windowsFeaturesBtn"),
@@ -183,26 +189,53 @@ async function renderWorkspaceStatus(status) {
   }
 
   els.workspaceCard.classList.remove("hidden");
-  els.workspaceBadge.dataset.state = status.running ? "on" : status.supported ? "off" : "unsupported";
-  els.workspaceBadge.textContent = status.running ? "RUNNING" : status.supported ? "OFF" : "SETUP";
 
-  if (status.running) {
-    els.workspaceReady.classList.remove("hidden");
-    els.workspaceSetup.classList.add("hidden");
-    const pin = String(status.pairingPin || "------");
-    els.workspacePin.textContent = pin.length === 6 ? pin.slice(0, 3) + " " + pin.slice(3) : pin;
+  if (!status.supported) {
+    els.workspaceBadge.dataset.state = "unsupported";
+    els.workspaceBadge.textContent = "UNAVAILABLE";
+    els.workspaceReady.classList.add("hidden");
+    els.workspaceSetup.classList.remove("hidden");
+    els.workspaceRequirement.textContent = status.error || status.reason || "Persistent Workspace is unavailable on this computer.";
+    els.windowsFeaturesBtn.classList.add("hidden");
+    els.workspaceIsoTools.classList.add("hidden");
     return;
   }
 
-  els.workspaceReady.classList.add("hidden");
-  els.workspaceSetup.classList.remove("hidden");
-  els.startWorkspaceBtn.disabled = !status.supported;
-  els.workspaceRequirement.textContent = status.error || status.reason || (
-    status.supported
-      ? "Starts an isolated Windows desktop in the background. The physical user can keep working normally."
-      : "Background Workspace is unavailable on this computer."
-  );
-  els.windowsFeaturesBtn.classList.toggle("hidden", status.supported || navigator.platform.indexOf("Win") === -1);
+  if (!status.hypervEnabled) {
+    els.workspaceBadge.dataset.state = "unsupported";
+    els.workspaceBadge.textContent = "SETUP";
+    els.workspaceReady.classList.add("hidden");
+    els.workspaceSetup.classList.remove("hidden");
+    els.workspaceRequirement.textContent = status.message || status.reason || "Enable Hyper-V to create a persistent workspace.";
+    els.windowsFeaturesBtn.classList.remove("hidden");
+    els.workspaceIsoTools.classList.add("hidden");
+    return;
+  }
+
+  if (!status.configured) {
+    els.workspaceBadge.dataset.state = "off";
+    els.workspaceBadge.textContent = "NEW";
+    els.workspaceReady.classList.add("hidden");
+    els.workspaceSetup.classList.remove("hidden");
+    els.workspaceRequirement.textContent = status.error || status.reason || "Choose a Windows ISO to create the workspace.";
+    els.windowsFeaturesBtn.classList.add("hidden");
+    els.workspaceIsoTools.classList.remove("hidden");
+    els.workspaceIsoName.textContent = status.isoPath ? status.isoPath.split(/[\\/]/).pop() : "No ISO selected";
+    els.startWorkspaceBtn.disabled = !status.isoPath;
+    return;
+  }
+
+  els.workspaceSetup.classList.add("hidden");
+  els.workspaceReady.classList.remove("hidden");
+  els.workspaceBadge.dataset.state = status.running ? "on" : "off";
+  els.workspaceBadge.textContent = status.running ? "RUNNING" : String(status.state || "SAVED").toUpperCase();
+  els.workspaceStateText.textContent = status.running
+    ? "Workspace is running in the background"
+    : "Workspace is preserved and currently stopped";
+  els.workspaceDataPath.textContent = "Persistent disk: " + (status.dataPath || "Cotrux VHDX");
+  els.resumeWorkspaceBtn.classList.toggle("hidden", Boolean(status.running));
+  els.openWorkspaceBtn.disabled = false;
+  els.stopWorkspaceBtn.disabled = !status.running;
 }
 
 async function refreshWorkspaceStatus() {
@@ -584,12 +617,28 @@ els.revokeAllBtn.addEventListener("click", async () => {
 
 els.startWorkspaceBtn.addEventListener("click", async () => {
   els.startWorkspaceBtn.disabled = true;
-  els.startWorkspaceBtn.textContent = "Starting…";
+  els.startWorkspaceBtn.textContent = "Creating persistent workspace…";
   const status = await window.cotrux.workspaceStart();
   await renderWorkspaceStatus(status);
-  els.startWorkspaceBtn.textContent = "Start Background Workspace";
-  els.startWorkspaceBtn.disabled = !status.supported;
-  setState(status.running ? "Background workspace running" : "Workspace could not start", status.running ? "ready" : "error");
+  els.startWorkspaceBtn.textContent = "Create Persistent Workspace";
+  setState(status.running ? "Persistent workspace running" : (status.error || "Workspace setup needs attention"), status.running ? "ready" : "error");
+});
+
+els.resumeWorkspaceBtn.addEventListener("click", async () => {
+  els.resumeWorkspaceBtn.disabled = true;
+  const status = await window.cotrux.workspaceStart();
+  await renderWorkspaceStatus(status);
+  els.resumeWorkspaceBtn.disabled = false;
+  setState(status.running ? "Persistent workspace running" : (status.error || "Workspace could not start"), status.running ? "ready" : "error");
+});
+
+els.chooseWorkspaceIsoBtn.addEventListener("click", async () => {
+  const status = await window.cotrux.workspaceChooseIso();
+  await renderWorkspaceStatus(status);
+});
+
+els.downloadWindowsBtn.addEventListener("click", async () => {
+  await window.cotrux.workspaceDownloadWindows();
 });
 
 els.stopWorkspaceBtn.addEventListener("click", async () => {
@@ -597,16 +646,24 @@ els.stopWorkspaceBtn.addEventListener("click", async () => {
   const status = await window.cotrux.workspaceStop();
   await renderWorkspaceStatus(status);
   els.stopWorkspaceBtn.disabled = false;
-  setState(status.running ? "Workspace still running" : "Background workspace stopped", status.running ? "error" : "ready");
+  setState(status.running ? "Workspace still running" : "Workspace saved · data preserved", status.running ? "error" : "ready");
 });
 
 els.openWorkspaceBtn.addEventListener("click", async () => {
   const status = await window.cotrux.workspaceConnect();
+  await renderWorkspaceStatus(status);
   if (!status.opened) setState(status.error || "Could not open workspace", "error");
 });
 
 els.windowsFeaturesBtn.addEventListener("click", async () => {
-  await window.cotrux.openWindowsFeatures();
+  els.windowsFeaturesBtn.disabled = true;
+  els.windowsFeaturesBtn.textContent = "Enabling Hyper-V…";
+  const status = await window.cotrux.workspaceEnableHyperV();
+  await renderWorkspaceStatus(status);
+  els.windowsFeaturesBtn.textContent = "Enable Hyper-V";
+  els.windowsFeaturesBtn.disabled = false;
+  if (status.restartNeeded) setState("Hyper-V enabled · restart Windows once", "pending");
+  else if (status.hypervEnabled) setState("Hyper-V ready", "ready");
 });
 
 els.reconnectBtn.addEventListener("click", async () => {
@@ -642,7 +699,7 @@ async function init() {
     els.accessCard.classList.add("hidden");
   } else {
     await refreshWorkspaceStatus();
-    workspacePollTimer = setInterval(refreshWorkspaceStatus, 6000);
+    workspacePollTimer = setInterval(refreshWorkspaceStatus, 15000);
   }
 
   renderTrustedDevices();
