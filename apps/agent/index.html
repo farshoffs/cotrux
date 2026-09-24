@@ -42,8 +42,30 @@
           <button id="stopWorkspaceBtn" class="danger-inline" type="button">Save &amp; stop</button>
         </div>
         <div class="workspace-guide">
-          <strong>One-time setup inside the VM</strong>
-          <span>Finish Windows installation, install Cotrux in the VM, then enable Unattended Access + Start Cotrux with this computer. It will appear in your controller as a separate computer.</span>
+          <strong>Automatic Cotrux setup inside the VM</strong>
+          <span>After Windows setup is finished and you are signed in, enter that Windows account once below. Cotrux will install and configure itself in the VM automatically.</span>
+        </div>
+
+        <div id="workspaceProvision" class="workspace-provision">
+          <div class="provision-head">
+            <div>
+              <strong id="workspaceProvisionTitle">Provision Cotrux automatically</strong>
+              <span id="workspaceProvisionText">The password is used only for this provisioning session and is not saved.</span>
+            </div>
+            <span id="workspaceProvisionBadge" class="mini-badge">NOT SET UP</span>
+          </div>
+          <div class="provision-grid">
+            <label for="workspaceGuestUser">Windows username inside workspace</label>
+            <input id="workspaceGuestUser" autocomplete="username" placeholder="e.g. Farhan" />
+            <label for="workspaceGuestPass">Windows password inside workspace</label>
+            <input id="workspaceGuestPass" type="password" autocomplete="current-password" placeholder="Used once, never stored" />
+            <button id="provisionWorkspaceBtn" class="primary full" type="button">Install &amp; Configure Cotrux</button>
+          </div>
+          <div id="workspacePairing" class="workspace-pairing hidden">
+            <span class="eyebrow">WORKSPACE PAIRING PIN</span>
+            <strong id="workspacePairingPin">------</strong>
+            <small>Use this once in the Cotrux controller. The workspace has unattended access enabled already.</small>
+          </div>
         </div>
       </div>
 
