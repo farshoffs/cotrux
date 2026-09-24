@@ -1,0 +1,14 @@
+{
+  "name": "cotrux",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/*", "services/*"],
+  "scripts": {
+    "dev:signal": "npm run dev -w @cotrux/signal",
+    "dev:controller": "npm run dev -w @cotrux/controller",
+    "build:controller": "npm run build -w @cotrux/controller",
+    "dev:agent": "npm run dev -w @cotrux/agent",
+    "dist:agent": "npm run dist -w @cotrux/agent"
+  },
+  "engines": { "node": ">=20" }
+}
