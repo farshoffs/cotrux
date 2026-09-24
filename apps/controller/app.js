@@ -770,10 +770,14 @@ function handlePointerDown(event) {
         remoteCursor = point;
         sendControl({ kind: "move", ...point });
       }
+      touchAction = {
+        mode: "mouse-direct",
+        button: event.button === 2 ? "right" : event.button === 1 ? "middle" : "left"
+      };
       sendControl({
         kind: "mouse",
         action: "down",
-        button: event.button === 2 ? "right" : event.button === 1 ? "middle" : "left"
+        button: touchAction.button
       });
     }
     event.preventDefault();
@@ -849,6 +853,16 @@ function handlePointerMove(event) {
     return;
   }
 
+  if (touchAction.mode === "mouse-direct") {
+    const point = videoPoint(event.clientX, event.clientY);
+    if (point) {
+      remoteCursor = point;
+      sendControl({ kind: "move", ...point });
+    }
+    event.preventDefault();
+    return;
+  }
+
   if (touchAction.mode === "trackpad") {
     const dx = event.clientX - touchAction.lastX;
     const dy = event.clientY - touchAction.lastY;
@@ -906,7 +920,7 @@ function handlePointerUp(event) {
       sendControl({
         kind: "mouse",
         action: "up",
-        button: event.button === 2 ? "right" : event.button === 1 ? "middle" : "left"
+        button: touchAction?.button || (event.button === 2 ? "right" : event.button === 1 ? "middle" : "left")
       });
     }
     touchAction = null;
