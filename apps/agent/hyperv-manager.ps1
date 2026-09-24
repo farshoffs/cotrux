@@ -236,6 +236,9 @@ try {
         throw "Downloaded Cotrux installer is incomplete."
       }
 
+      Invoke-Command -Session $session -ScriptBlock {
+        New-Item -ItemType Directory -Path "C:\CotruxProvision" -Force | Out-Null
+      }
       Copy-Item -ToSession $session -Path $tempInstaller -Destination "C:\CotruxProvision\Cotrux-Setup.exe" -Force
 
       $guestResult = Invoke-Command -Session $session -ArgumentList $SignalUrl,$PairingPin -ScriptBlock {
