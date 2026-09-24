@@ -914,10 +914,27 @@ function handlePointerMove(event) {
     touchAction.lastY = event.clientY;
     if (Math.hypot(event.clientX - touchAction.startX, event.clientY - touchAction.startY) > 5) touchAction.moved = true;
 
-    const rect = els.videoSurface.getBoundingClientRect();
-    const sensitivity = 1.25;
-    remoteCursor.x = clamp(remoteCursor.x + (dx / Math.max(1, rect.width)) * sensitivity, 0, 1);
-    remoteCursor.y = clamp(remoteCursor.y + (dy / Math.max(1, rect.height)) * sensitivity, 0, 1);
+    // Trackpad movement must be independent of the rendered video rectangle.
+    // The old implementation divided by the zoomed/letterboxed video size,
+    // which made part of the remote desktop effectively unreachable on some
+    // mobile aspect ratios and zoom levels.
+    const stageRect = els.remoteStage.getBoundingClientRect();
+    const distance = Math.hypot(dx, dy);
+    const acceleration = 1 + Math.min(0.9, distance / 22);
+    const horizontalSensitivity = 1.8 * acceleration;
+    const verticalSensitivity = 2.15 * acceleration;
+
+    remoteCursor.x = clamp(
+      remoteCursor.x + (dx / Math.max(1, stageRect.width)) * horizontalSensitivity,
+      0,
+      1
+    );
+    remoteCursor.y = clamp(
+      remoteCursor.y + (dy / Math.max(1, stageRect.height)) * verticalSensitivity,
+      0,
+      1
+    );
+
     sendControl({ kind: "move", ...remoteCursor });
     event.preventDefault();
     return;
