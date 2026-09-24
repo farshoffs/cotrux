@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#090b10" />
+  <meta name="theme-color" content="#050609" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Cotrux Remote</title>
@@ -31,7 +31,7 @@
       <article class="hero-card">
         <span class="eyebrow">YOUR COMPUTERS</span>
         <h1>Connect from anywhere.</h1>
-        <p>Pair a computer once. When unattended access is enabled on that computer, it appears here for one-tap reconnects with no PIN.</p>
+        <p>Pair once, then open a trusted computer directly. Remote sessions now use a dedicated full-screen workspace instead of staying inside the dashboard.</p>
 
         <div id="trustedHosts" class="trusted-hosts"></div>
 
@@ -74,34 +74,184 @@
         </details>
       </article>
     </section>
+  </main>
 
-    <section id="remoteView" class="remote-view hidden" aria-live="polite">
-      <div class="remote-toolbar">
-        <div class="remote-title">
+  <section id="remoteView" class="remote-session hidden" aria-live="polite">
+    <div id="remoteStage" class="remote-stage" tabindex="0">
+      <div id="videoSurface" class="video-surface">
+        <video id="remoteVideo" autoplay playsinline></video>
+      </div>
+
+      <div id="emptyScreen" class="empty-screen">
+        <div class="spinner"></div>
+        <strong>Opening remote desktop</strong>
+        <span>The host is preparing the stream.</span>
+      </div>
+
+      <header id="sessionTopbar" class="session-topbar">
+        <button id="backBtn" class="session-button back-button" type="button" title="Back">‹</button>
+        <div class="session-identity">
           <strong id="hostName">Remote computer</strong>
           <span id="connectionInfo">Connecting…</span>
         </div>
-        <div class="tool-actions">
-          <button id="keyboardBtn" class="icon-btn" type="button" title="Keyboard">⌨</button>
-          <button id="clipboardBtn" class="icon-btn" type="button" title="Send clipboard">⧉</button>
-          <button id="fullscreenBtn" class="icon-btn" type="button" title="Fullscreen">⛶</button>
-          <button id="stopBtn" class="danger" type="button">Stop</button>
+        <div class="session-status">
+          <span class="session-dot"></span>
+          <span id="sessionStatusText">Connecting</span>
         </div>
+        <div class="session-top-actions">
+          <button id="fullscreenBtn" class="session-button" type="button" title="Fullscreen">⛶</button>
+          <button id="orientationBtn" class="session-button" type="button" title="Rotate screen">↻</button>
+          <button id="stopBtn" class="session-button end-session" type="button" title="End session">×</button>
+        </div>
+      </header>
+
+      <div id="zoomHud" class="zoom-hud">
+        <button id="zoomOutBtn" type="button" aria-label="Zoom out">−</button>
+        <button id="zoomValueBtn" type="button" aria-label="Reset zoom">100%</button>
+        <button id="zoomInBtn" type="button" aria-label="Zoom in">+</button>
       </div>
 
-      <div id="screenFrame" class="screen-frame" tabindex="0">
-        <video id="remoteVideo" autoplay playsinline></video>
-        <div id="emptyScreen" class="empty-screen">
-          <div class="spinner"></div>
-          <strong>Waiting for desktop stream</strong>
-          <span>The host is preparing the session.</span>
-        </div>
-      </div>
+      <div id="modeBadge" class="mode-badge">Direct touch</div>
 
-      <input id="mobileKeyboard" class="mobile-keyboard" autocomplete="off" autocapitalize="off" />
-      <p class="hint">Tap/click the desktop to control it. Use the keyboard button for typing on iPhone.</p>
-    </section>
-  </main>
+      <nav id="sessionDock" class="session-dock" aria-label="Remote controls">
+        <button id="modeBtn" class="dock-button active" type="button">
+          <span class="dock-icon">◎</span><span id="modeBtnLabel">Direct</span>
+        </button>
+        <button id="leftClickBtn" class="dock-button" type="button">
+          <span class="dock-icon">◐</span><span>Click</span>
+        </button>
+        <button id="rightClickBtn" class="dock-button" type="button">
+          <span class="dock-icon">◑</span><span>Right</span>
+        </button>
+        <button id="keyboardBtn" class="dock-button" type="button">
+          <span class="dock-icon">⌨</span><span>Keyboard</span>
+        </button>
+        <button id="shortcutsBtn" class="dock-button" type="button">
+          <span class="dock-icon">⌘</span><span>Shortcuts</span>
+        </button>
+        <button id="viewBtn" class="dock-button" type="button">
+          <span class="dock-icon">⊕</span><span>View</span>
+        </button>
+        <button id="clipboardBtn" class="dock-button" type="button">
+          <span class="dock-icon">⧉</span><span>Clipboard</span>
+        </button>
+      </nav>
+
+      <div id="controlDrawer" class="control-drawer hidden">
+        <div class="drawer-grabber"></div>
+        <div class="drawer-head">
+          <div>
+            <strong id="drawerTitle">Keyboard</strong>
+            <span id="drawerSubtitle">Send keys to the remote computer</span>
+          </div>
+          <button id="drawerCloseBtn" class="drawer-close" type="button">×</button>
+        </div>
+
+        <section id="keyboardPanel" class="drawer-panel">
+          <input id="mobileKeyboard" class="typing-capture" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Tap here and type…" />
+          <div class="modifier-row">
+            <button class="key-button modifier-key" data-modifier="ControlLeft" type="button">Ctrl</button>
+            <button class="key-button modifier-key" data-modifier="AltLeft" type="button">Alt</button>
+            <button class="key-button modifier-key" data-modifier="ShiftLeft" type="button">Shift</button>
+            <button class="key-button modifier-key" data-modifier="MetaLeft" type="button">Win</button>
+            <button id="releaseModifiersBtn" class="key-button subtle" type="button">Release</button>
+          </div>
+
+          <div class="special-key-grid">
+            <button class="key-button" data-key="Escape" data-code="Escape" type="button">Esc</button>
+            <button class="key-button" data-key="Tab" data-code="Tab" type="button">Tab</button>
+            <button class="key-button" data-key="Enter" data-code="Enter" type="button">Enter</button>
+            <button class="key-button" data-key="Backspace" data-code="Backspace" type="button">⌫</button>
+            <button class="key-button" data-key="Delete" data-code="Delete" type="button">Del</button>
+            <button class="key-button" data-key="Home" data-code="Home" type="button">Home</button>
+            <button class="key-button" data-key="End" data-code="End" type="button">End</button>
+            <button class="key-button" data-key="PageUp" data-code="PageUp" type="button">PgUp</button>
+            <button class="key-button" data-key="PageDown" data-code="PageDown" type="button">PgDn</button>
+            <button class="key-button arrow-key" data-key="ArrowLeft" data-code="ArrowLeft" type="button">←</button>
+            <button class="key-button arrow-key" data-key="ArrowUp" data-code="ArrowUp" type="button">↑</button>
+            <button class="key-button arrow-key" data-key="ArrowDown" data-code="ArrowDown" type="button">↓</button>
+            <button class="key-button arrow-key" data-key="ArrowRight" data-code="ArrowRight" type="button">→</button>
+          </div>
+
+          <div class="function-key-strip" aria-label="Function keys">
+            <button class="key-button" data-key="F1" data-code="F1" type="button">F1</button>
+            <button class="key-button" data-key="F2" data-code="F2" type="button">F2</button>
+            <button class="key-button" data-key="F3" data-code="F3" type="button">F3</button>
+            <button class="key-button" data-key="F4" data-code="F4" type="button">F4</button>
+            <button class="key-button" data-key="F5" data-code="F5" type="button">F5</button>
+            <button class="key-button" data-key="F6" data-code="F6" type="button">F6</button>
+            <button class="key-button" data-key="F7" data-code="F7" type="button">F7</button>
+            <button class="key-button" data-key="F8" data-code="F8" type="button">F8</button>
+            <button class="key-button" data-key="F9" data-code="F9" type="button">F9</button>
+            <button class="key-button" data-key="F10" data-code="F10" type="button">F10</button>
+            <button class="key-button" data-key="F11" data-code="F11" type="button">F11</button>
+            <button class="key-button" data-key="F12" data-code="F12" type="button">F12</button>
+          </div>
+        </section>
+
+        <section id="shortcutsPanel" class="drawer-panel hidden">
+          <div class="shortcut-section">
+            <span class="shortcut-heading">WINDOWS</span>
+            <div class="shortcut-grid">
+              <button class="shortcut-button" data-combo="alt-tab" type="button"><strong>Alt + Tab</strong><span>Switch app</span></button>
+              <button class="shortcut-button" data-combo="win-d" type="button"><strong>Win + D</strong><span>Desktop</span></button>
+              <button class="shortcut-button" data-combo="win-e" type="button"><strong>Win + E</strong><span>Explorer</span></button>
+              <button class="shortcut-button" data-combo="win-r" type="button"><strong>Win + R</strong><span>Run</span></button>
+              <button class="shortcut-button" data-combo="ctrl-shift-esc" type="button"><strong>Ctrl + Shift + Esc</strong><span>Task Manager</span></button>
+              <button class="shortcut-button warning" data-combo="alt-f4" type="button"><strong>Alt + F4</strong><span>Close app</span></button>
+            </div>
+          </div>
+
+          <div class="shortcut-section">
+            <span class="shortcut-heading">EDIT</span>
+            <div class="shortcut-grid compact-shortcuts">
+              <button class="shortcut-button" data-combo="ctrl-c" type="button"><strong>Ctrl + C</strong><span>Copy</span></button>
+              <button class="shortcut-button" data-combo="ctrl-v" type="button"><strong>Ctrl + V</strong><span>Paste</span></button>
+              <button class="shortcut-button" data-combo="ctrl-x" type="button"><strong>Ctrl + X</strong><span>Cut</span></button>
+              <button class="shortcut-button" data-combo="ctrl-a" type="button"><strong>Ctrl + A</strong><span>Select all</span></button>
+              <button class="shortcut-button" data-combo="ctrl-z" type="button"><strong>Ctrl + Z</strong><span>Undo</span></button>
+              <button class="shortcut-button" data-combo="ctrl-y" type="button"><strong>Ctrl + Y</strong><span>Redo</span></button>
+              <button class="shortcut-button" data-combo="ctrl-s" type="button"><strong>Ctrl + S</strong><span>Save</span></button>
+              <button class="shortcut-button" data-combo="ctrl-f" type="button"><strong>Ctrl + F</strong><span>Find</span></button>
+            </div>
+          </div>
+
+          <div class="shortcut-section">
+            <span class="shortcut-heading">BROWSER / APPS</span>
+            <div class="shortcut-grid compact-shortcuts">
+              <button class="shortcut-button" data-combo="ctrl-l" type="button"><strong>Ctrl + L</strong><span>Address</span></button>
+              <button class="shortcut-button" data-combo="ctrl-t" type="button"><strong>Ctrl + T</strong><span>New tab</span></button>
+              <button class="shortcut-button" data-combo="ctrl-w" type="button"><strong>Ctrl + W</strong><span>Close tab</span></button>
+              <button class="shortcut-button" data-combo="ctrl-shift-t" type="button"><strong>Ctrl + Shift + T</strong><span>Reopen tab</span></button>
+            </div>
+          </div>
+
+          <p class="secure-attention-note">Windows blocks synthetic Ctrl + Alt + Delete from normal desktop apps. Cotrux does not show a fake button for it.</p>
+        </section>
+
+        <section id="viewPanel" class="drawer-panel hidden">
+          <div class="view-big-controls">
+            <button id="fitBtn" class="view-option active" type="button"><strong>Fit</strong><span>Whole desktop</span></button>
+            <button id="fillBtn" class="view-option" type="button"><strong>Fill</strong><span>Fill device screen</span></button>
+            <button id="actualSizeBtn" class="view-option" type="button"><strong>100%</strong><span>Remote pixel size</span></button>
+            <button id="centerViewBtn" class="view-option" type="button"><strong>Center</strong><span>Reset pan</span></button>
+          </div>
+          <div class="zoom-slider-row">
+            <button id="drawerZoomOutBtn" class="key-button" type="button">−</button>
+            <input id="zoomRange" type="range" min="50" max="400" step="10" value="100" />
+            <button id="drawerZoomInBtn" class="key-button" type="button">+</button>
+            <span id="drawerZoomValue">100%</span>
+          </div>
+          <div class="interaction-options">
+            <button class="interaction-option active" data-mode="direct" type="button"><strong>Direct touch</strong><span>Tap exactly where you want to click</span></button>
+            <button class="interaction-option" data-mode="trackpad" type="button"><strong>Trackpad</strong><span>Move the mouse relatively with one finger</span></button>
+            <button class="interaction-option" data-mode="pan" type="button"><strong>Pan screen</strong><span>Drag the zoomed desktop without clicking</span></button>
+          </div>
+          <p class="gesture-help"><strong>Gestures:</strong> pinch with two fingers to zoom. In Trackpad mode, two-finger vertical movement scrolls. In Pan mode, one finger moves around the zoomed desktop.</p>
+        </section>
+      </div>
+    </div>
+  </section>
 
   <script type="module" src="./app.js"></script>
 </body>

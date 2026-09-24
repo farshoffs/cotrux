@@ -1,4 +1,4 @@
-const CACHE = "cotrux-controller-v3";
+const CACHE = "cotrux-controller-v4";
 const ASSETS = [
   "./",
   "./index.html",
@@ -22,7 +22,6 @@ self.addEventListener("activate", event => {
 
 self.addEventListener("fetch", event => {
   if (event.request.method !== "GET") return;
-
   event.respondWith((async () => {
     try {
       const fresh = await fetch(event.request);
