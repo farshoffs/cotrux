@@ -1,4 +1,4 @@
-const CACHE = "cotrux-pages-root-v3";
+const CACHE = "cotrux-pages-root-v4";
 const ASSETS = [
   "./",
   "./index.html",
