@@ -22,7 +22,7 @@ Cotrux is intended only for computers you own or are authorized to control.
 5. The host accepts it and the WebRTC desktop session starts.
 6. Either side can end the session. The host then receives a fresh PIN.
 
-The server rate-limits PIN attempts. This MVP does **not** enable hidden or unattended access.
+The server rate-limits PIN attempts. Optional unattended access is device-specific, explicitly enabled on the host, and revocable from the Cotrux GUI.
 
 ## Run locally
 
@@ -141,12 +141,14 @@ For the simplest production setup, deploy the included `render.yaml` (or the Doc
 
 ## Security model
 
-- Explicit host approval for every session.
+- Explicit host approval for first-time pairing.
+- Optional unattended access is disabled by default and granted per trusted controller.
+- Trusted controllers can be revoked individually or all at once from the host GUI.
 - Visible active-session UI and host-side stop control.
-- Six-digit PIN rotates after sessions.
+- Six-digit PIN rotates for normal pairing.
 - Server-side PIN-attempt rate limiting.
 - WebRTC DTLS/SRTP encryption for media and data channels.
-- No persistent unattended-access password in this MVP.
+- No shared permanent unattended password.
 - No hidden agent, stealth mode, key logging, or background surveillance behavior.
 - WebSocket signaling payload is limited in size.
 - Clipboard writes are bounded before being passed to the host.
