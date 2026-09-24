@@ -1,0 +1,9 @@
+# Example only. Replace secrets/domain before production.
+listening-port=3478
+fingerprint
+lt-cred-mech
+realm=turn.example.com
+user=cotrux:REPLACE_WITH_A_LONG_RANDOM_SECRET
+no-multicast-peers
+no-loopback-peers
+stale-nonce=600
