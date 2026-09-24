@@ -73,13 +73,49 @@ h1 { font-size: 27px; margin: 8px 0 8px; letter-spacing: -.04em; }
 .workspace-badge[data-state="unsupported"] { color: #ffc66b; border-color: rgba(255,198,107,.22); background: rgba(255,198,107,.07); }
 
 .workspace-ready {
-  margin-top: 19px; padding-top: 18px; border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: end;
+  margin-top: 19px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
 }
-.workspace-details strong { display: block; font-size: 14px; }
-.workspace-details span { display: block; color: #c7ccd7; font-size: 11px; margin-top: 5px; word-break: break-all; }
-.workspace-details small { display: block; max-width: 470px; color: var(--muted); line-height: 1.45; margin-top: 6px; }
-.workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.workspace-details {
+  min-width: 0;
+  width: 100%;
+}
+.workspace-details strong {
+  display: block;
+  font-size: 14px;
+}
+.workspace-details span {
+  display: block;
+  color: #c7ccd7;
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.workspace-details small {
+  display: block;
+  max-width: 620px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin-top: 6px;
+}
+.workspace-actions {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.workspace-actions button {
+  flex: 0 1 auto;
+  white-space: nowrap;
+}
 .workspace-guide {
   grid-column: 1/-1; margin-top: 4px; padding: 13px; border: 1px solid var(--line);
   border-radius: 14px; background: rgba(255,255,255,.03);
@@ -229,7 +265,7 @@ footer { color: #686f80; font-size: 10px; text-align: center; padding: 4px 0 12p
   .app { padding: 14px; }
   .workspace-card, .access-card, .pin-card, .request-card, .session-card, .settings { padding: 18px; }
   .pin { font-size: 46px; }
-  .workspace-ready { grid-template-columns: 1fr; }
-  .workspace-actions { width: 100%; }
-  .workspace-actions button { flex: 1; }
+  .workspace-ready { grid-template-columns: minmax(0, 1fr); }
+  .workspace-actions { width: 100%; display: grid; grid-template-columns: 1fr; }
+  .workspace-actions button { width: 100%; white-space: normal; }
 }
