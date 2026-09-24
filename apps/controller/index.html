@@ -29,41 +29,45 @@
 
     <section id="connectView" class="connect-grid">
       <article class="hero-card">
-        <span class="eyebrow">PRIVATE REMOTE ACCESS</span>
-        <h1>Control your computer from anywhere.</h1>
-        <p>Enter the six-digit PIN shown by the Cotrux desktop agent. The host must approve every session.</p>
+        <span class="eyebrow">YOUR COMPUTERS</span>
+        <h1>Connect from anywhere.</h1>
+        <p>Pair a computer once. When unattended access is enabled on that computer, it appears here for one-tap reconnects with no PIN.</p>
+
+        <div id="trustedHosts" class="trusted-hosts"></div>
+
+        <div class="pair-divider"><span>Pair a new computer</span></div>
 
         <form id="connectForm" class="connect-form">
-          <label for="pin">Connection PIN</label>
-          <input id="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000 000" />
+          <label for="pin">6-digit PIN shown on the Cotrux desktop app</label>
+          <input id="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000" />
           <button class="primary" type="submit">Request access</button>
         </form>
+        <p class="pair-note">On the computer, approve the request and select “Trust this controller” for future PIN-free access.</p>
       </article>
 
       <article class="settings-card">
         <div class="section-head">
           <div>
             <span class="eyebrow">CONNECTION</span>
-            <h2>Network settings</h2>
+            <h2>Ready to use</h2>
+            <p>Cotrux is preconfigured with its online service. You normally don't need to change anything here.</p>
           </div>
         </div>
 
-        <label for="signalUrl">Signaling WebSocket</label>
-        <input id="signalUrl" spellcheck="false" placeholder="wss://signal.example.com/ws" />
-
         <details>
-          <summary>TURN / advanced</summary>
+          <summary>Advanced network settings</summary>
           <div class="detail-grid">
+            <label for="signalUrl">Cotrux server</label>
+            <input id="signalUrl" spellcheck="false" placeholder="wss://cotrux-production.up.railway.app/ws" />
             <label for="turnUrl">TURN URL</label>
-            <input id="turnUrl" spellcheck="false" placeholder="turn:turn.example.com:3478" />
+            <input id="turnUrl" spellcheck="false" placeholder="Optional TURN server" />
             <label for="turnUser">TURN username</label>
             <input id="turnUser" autocomplete="username" />
             <label for="turnPass">TURN credential</label>
             <input id="turnPass" type="password" autocomplete="current-password" />
+            <button id="saveSettings" class="ghost" type="button">Save settings</button>
           </div>
         </details>
-
-        <button id="saveSettings" class="ghost" type="button">Save settings</button>
       </article>
     </section>
 
@@ -86,12 +90,12 @@
         <div id="emptyScreen" class="empty-screen">
           <div class="spinner"></div>
           <strong>Waiting for desktop stream</strong>
-          <span>The host has approved the session.</span>
+          <span>The host is preparing the session.</span>
         </div>
       </div>
 
       <input id="mobileKeyboard" class="mobile-keyboard" autocomplete="off" autocapitalize="off" />
-      <p class="hint">Tap/click the desktop to control it. Two-finger scrolling is mapped to mouse wheel where supported.</p>
+      <p class="hint">Tap/click the desktop to control it. Use the keyboard button for typing on iPhone.</p>
     </section>
   </main>
 

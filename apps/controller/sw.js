@@ -1,4 +1,4 @@
-const CACHE = "cotrux-controller-v1";
+const CACHE = "cotrux-controller-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -22,7 +22,15 @@ self.addEventListener("activate", event => {
 
 self.addEventListener("fetch", event => {
   if (event.request.method !== "GET") return;
-  event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request))
-  );
+
+  event.respondWith((async () => {
+    try {
+      const fresh = await fetch(event.request);
+      const cache = await caches.open(CACHE);
+      cache.put(event.request, fresh.clone());
+      return fresh;
+    } catch {
+      return (await caches.match(event.request)) || Response.error();
+    }
+  })());
 });

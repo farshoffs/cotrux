@@ -1,6 +1,6 @@
 {
   "name": "@cotrux/agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "main.js",
@@ -35,6 +35,13 @@
     "win": {
       "target": "nsis"
     },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Cotrux"
+    },
     "linux": {
       "target": [
         "AppImage"
@@ -43,6 +50,6 @@
     },
     "executableName": "Cotrux"
   },
-  "description": "Cotrux consent-first remote desktop host agent",
+  "description": "Cotrux remote desktop host agent with optional trusted unattended access",
   "author": "Cotrux"
 }

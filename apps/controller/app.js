@@ -1,10 +1,12 @@
 const $ = selector => document.querySelector(selector);
+const DEFAULT_SIGNAL_URL = "wss://cotrux-production.up.railway.app/ws";
 
 const els = {
   connectView: $("#connectView"),
   remoteView: $("#remoteView"),
   connectForm: $("#connectForm"),
   pin: $("#pin"),
+  trustedHosts: $("#trustedHosts"),
   signalUrl: $("#signalUrl"),
   turnUrl: $("#turnUrl"),
   turnUser: $("#turnUser"),
@@ -28,20 +30,15 @@ let ws;
 let pc;
 let controlChannel;
 let pendingCandidates = [];
-let currentPin = "";
 let pointerMoveTimer = 0;
 let sessionActive = false;
+let currentConnection = null;
+
+const controllerId = localStorage.getItem("cotrux.controllerId") || crypto.randomUUID();
+localStorage.setItem("cotrux.controllerId", controllerId);
 
 const saved = JSON.parse(localStorage.getItem("cotrux.controller.settings") || "{}");
-const isGitHubPages = location.hostname.endsWith(".github.io");
-const isLocalDev = ["localhost", "127.0.0.1"].includes(location.hostname);
-const sameOriginSignal =
-  !isGitHubPages && (location.protocol === "http:" || location.protocol === "https:")
-    ? (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws"
-    : isLocalDev
-      ? "ws://localhost:8787/ws"
-      : "";
-els.signalUrl.value = saved.signalUrl || sameOriginSignal;
+els.signalUrl.value = saved.signalUrl || DEFAULT_SIGNAL_URL;
 els.turnUrl.value = saved.turnUrl || "";
 els.turnUser.value = saved.turnUser || "";
 els.turnPass.value = saved.turnPass || "";
@@ -53,14 +50,89 @@ function setStatus(text, state = "idle") {
 
 function saveSettings() {
   const settings = {
-    signalUrl: els.signalUrl.value.trim(),
+    signalUrl: els.signalUrl.value.trim() || DEFAULT_SIGNAL_URL,
     turnUrl: els.turnUrl.value.trim(),
     turnUser: els.turnUser.value.trim(),
     turnPass: els.turnPass.value
   };
   localStorage.setItem("cotrux.controller.settings", JSON.stringify(settings));
+  els.signalUrl.value = settings.signalUrl;
   setStatus("Settings saved", "idle");
   return settings;
+}
+
+function loadTrustedHosts() {
+  try {
+    const items = JSON.parse(localStorage.getItem("cotrux.trustedHosts") || "[]");
+    return Array.isArray(items) ? items.filter(item => item?.deviceId && item?.token) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTrustedHosts(items) {
+  localStorage.setItem("cotrux.trustedHosts", JSON.stringify(items.slice(0, 30)));
+  renderTrustedHosts();
+}
+
+function storeTrustedHost(grant) {
+  if (!grant?.deviceId || !grant?.token || grant.controllerId !== controllerId) return;
+
+  const items = loadTrustedHosts().filter(item => item.deviceId !== grant.deviceId);
+  items.unshift({
+    deviceId: grant.deviceId,
+    hostName: String(grant.hostName || "Cotrux computer").slice(0, 80),
+    controllerId,
+    token: grant.token,
+    trustedAt: Date.now()
+  });
+
+  saveTrustedHosts(items);
+  setStatus("Computer saved for one-tap access", "connected");
+}
+
+function renderTrustedHosts() {
+  const items = loadTrustedHosts();
+  els.trustedHosts.innerHTML = "";
+
+  if (!items.length) {
+    els.trustedHosts.innerHTML = '<div class="empty-hosts"><strong>No trusted computers yet</strong><span>Pair once with the PIN below, then trust this controller on the desktop app.</span></div>';
+    return;
+  }
+
+  for (const host of items) {
+    const row = document.createElement("div");
+    row.className = "trusted-host";
+
+    const info = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = host.hostName || "Cotrux computer";
+    const sub = document.createElement("span");
+    sub.textContent = "Trusted · no PIN required";
+    info.append(name, sub);
+
+    const actions = document.createElement("div");
+    actions.className = "trusted-actions";
+
+    const connect = document.createElement("button");
+    connect.className = "primary compact";
+    connect.type = "button";
+    connect.textContent = "Connect";
+    connect.addEventListener("click", () => connectTrusted(host));
+
+    const remove = document.createElement("button");
+    remove.className = "ghost compact";
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => {
+      saveTrustedHosts(loadTrustedHosts().filter(item => item.deviceId !== host.deviceId));
+      setStatus("Saved computer removed", "idle");
+    });
+
+    actions.append(connect, remove);
+    row.append(info, actions);
+    els.trustedHosts.append(row);
+  }
 }
 
 function getIceServers() {
@@ -103,16 +175,19 @@ function teardownPeer() {
 
 function showConnect(message = "Ready", state = "idle") {
   teardownPeer();
+  currentConnection = null;
   els.remoteView.classList.add("hidden");
   els.connectView.classList.remove("hidden");
   setStatus(message, state);
 }
 
-function showRemote(hostName = "Remote computer") {
+function showRemote(hostName = "Remote computer", unattended = false) {
   els.connectView.classList.add("hidden");
   els.remoteView.classList.remove("hidden");
   els.hostName.textContent = hostName;
-  els.connectionInfo.textContent = "Negotiating encrypted WebRTC session…";
+  els.connectionInfo.textContent = unattended
+    ? "Trusted connection · preparing encrypted session…"
+    : "Preparing encrypted WebRTC session…";
   setStatus("Connecting", "pending");
 }
 
@@ -121,9 +196,7 @@ async function createPeer() {
   pc = new RTCPeerConnection({ iceServers: getIceServers() });
 
   pc.onicecandidate = event => {
-    if (event.candidate) {
-      sendWs({ type: "signal", data: { candidate: event.candidate } });
-    }
+    if (event.candidate) sendWs({ type: "signal", data: { candidate: event.candidate } });
   };
 
   pc.ontrack = event => {
@@ -131,7 +204,9 @@ async function createPeer() {
     if (stream) {
       els.remoteVideo.srcObject = stream;
       els.emptyScreen.classList.add("hidden");
-      els.connectionInfo.textContent = "Live desktop · end-to-end WebRTC";
+      els.connectionInfo.textContent = currentConnection?.unattended
+        ? "Live desktop · trusted access"
+        : "Live desktop · controls active";
     }
   };
 
@@ -145,7 +220,9 @@ async function createPeer() {
     if (state === "connected") {
       sessionActive = true;
       setStatus("Connected", "connected");
-      els.connectionInfo.textContent = "Live desktop · controls active";
+      els.connectionInfo.textContent = currentConnection?.unattended
+        ? "Live desktop · trusted access"
+        : "Live desktop · controls active";
       els.screenFrame.focus();
     } else if (["failed", "disconnected"].includes(state)) {
       setStatus("Connection lost", "error");
@@ -158,11 +235,23 @@ async function createPeer() {
 
 function wireControlChannel() {
   if (!controlChannel) return;
+
   controlChannel.onopen = () => {
     sessionActive = true;
     setStatus("Connected", "connected");
-    els.connectionInfo.textContent = "Live desktop · controls active";
+    els.connectionInfo.textContent = currentConnection?.unattended
+      ? "Live desktop · trusted access"
+      : "Live desktop · controls active";
   };
+
+  controlChannel.onmessage = event => {
+    let payload;
+    try { payload = JSON.parse(event.data); } catch { return; }
+    if (payload?.kind === "cotrux-trust-grant") {
+      storeTrustedHost(payload);
+    }
+  };
+
   controlChannel.onclose = () => {
     sessionActive = false;
     setStatus("Control closed", "error");
@@ -189,17 +278,18 @@ async function handleSignal(data) {
   }
 }
 
-function connectToHost(pin) {
-  const url = els.signalUrl.value.trim();
-  if (!url) {
-    setStatus("Add signaling URL", "error");
-    els.signalUrl.focus();
-    return;
-  }
+function controllerName() {
+  if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) return "Cotrux on iPhone";
+  if (/Android/i.test(navigator.userAgent)) return "Cotrux on Android";
+  return "Cotrux web controller";
+}
 
+function openSignal(joinPayload, context) {
+  const url = (els.signalUrl.value.trim() || DEFAULT_SIGNAL_URL);
+  els.signalUrl.value = url;
   saveSettings();
-  currentPin = pin;
-  setStatus("Connecting to service", "pending");
+  currentConnection = context;
+  setStatus("Connecting to Cotrux", "pending");
 
   if (ws) {
     try { ws.close(); } catch {}
@@ -208,17 +298,13 @@ function connectToHost(pin) {
   try {
     ws = new WebSocket(url);
   } catch {
-    setStatus("Invalid signaling URL", "error");
+    setStatus("Invalid server address", "error");
     return;
   }
 
   ws.onopen = () => {
-    setStatus("Requesting host approval", "pending");
-    sendWs({
-      type: "controller-join",
-      pin,
-      name: navigator.userAgent.includes("iPhone") ? "Cotrux on iPhone" : "Cotrux web controller"
-    });
+    setStatus(context.unattended ? "Connecting to trusted computer" : "Requesting host approval", "pending");
+    sendWs(joinPayload);
   };
 
   ws.onmessage = async event => {
@@ -226,12 +312,15 @@ function connectToHost(pin) {
     try { msg = JSON.parse(event.data); } catch { return; }
 
     if (msg.type === "pending") {
+      currentConnection.hostName = msg.hostName || currentConnection.hostName;
       setStatus("Awaiting approval", "pending");
       return;
     }
 
     if (msg.type === "paired") {
-      showRemote(msg.hostName || "Remote computer");
+      currentConnection.unattended = Boolean(msg.unattended);
+      currentConnection.hostName = msg.hostName || currentConnection.hostName || "Remote computer";
+      showRemote(currentConnection.hostName, currentConnection.unattended);
       return;
     }
 
@@ -259,18 +348,58 @@ function connectToHost(pin) {
       const errors = {
         HOST_NOT_FOUND: "PIN not found",
         HOST_DISCONNECTED: "Host disconnected",
-        BAD_PIN: "Invalid PIN"
+        BAD_PIN: "Invalid PIN",
+        HOST_BUSY: "Computer is already in a session",
+        RATE_LIMITED: "Too many attempts. Try again shortly.",
+        TRUST_HOST_OFFLINE: "Trusted computer is offline",
+        TRUST_DISABLED: "Unattended access is disabled on that computer",
+        TRUST_INVALID: "Trusted access was revoked. Pair again with a PIN."
       };
+
+      if (["TRUST_DISABLED", "TRUST_INVALID"].includes(msg.code) && currentConnection?.deviceId) {
+        setStatus(errors[msg.code], "error");
+        els.remoteView.classList.add("hidden");
+        els.connectView.classList.remove("hidden");
+        return;
+      }
+
       showConnect(errors[msg.code] || "Connection error", "error");
     }
   };
 
-  ws.onerror = () => setStatus("Signaling connection failed", "error");
+  ws.onerror = () => setStatus("Cotrux service connection failed", "error");
   ws.onclose = () => {
     if (!sessionActive && !els.remoteView.classList.contains("hidden")) {
       setStatus("Service disconnected", "error");
     }
   };
+}
+
+function connectWithPin(pin) {
+  openSignal({
+    type: "controller-join",
+    pin,
+    controllerId,
+    name: controllerName(),
+    wantsTrust: true
+  }, {
+    unattended: false,
+    hostName: "Remote computer"
+  });
+}
+
+function connectTrusted(host) {
+  openSignal({
+    type: "trusted-join",
+    deviceId: host.deviceId,
+    controllerId,
+    token: host.token,
+    name: controllerName()
+  }, {
+    unattended: true,
+    hostName: host.hostName || "Trusted computer",
+    deviceId: host.deviceId
+  });
 }
 
 function videoPoint(clientX, clientY) {
@@ -325,6 +454,7 @@ els.screenFrame.addEventListener("pointerdown", event => {
   });
   event.preventDefault();
 });
+
 els.screenFrame.addEventListener("pointerup", event => {
   if (!sessionActive) return;
   sendControl({
@@ -334,6 +464,7 @@ els.screenFrame.addEventListener("pointerup", event => {
   });
   event.preventDefault();
 });
+
 els.screenFrame.addEventListener("contextmenu", event => event.preventDefault());
 els.screenFrame.addEventListener("wheel", event => {
   if (!sessionActive) return;
@@ -368,6 +499,7 @@ els.mobileKeyboard.addEventListener("input", () => {
     els.mobileKeyboard.value = "";
   }
 });
+
 els.mobileKeyboard.addEventListener("keydown", event => {
   if (event.key === "Backspace") sendControl({ kind: "key", action: "tap", key: "Backspace", code: "Backspace" });
   if (event.key === "Enter") sendControl({ kind: "key", action: "tap", key: "Enter", code: "Enter" });
@@ -415,8 +547,10 @@ els.connectForm.addEventListener("submit", event => {
     setStatus("Enter 6-digit PIN", "error");
     return;
   }
-  connectToHost(pin);
+  connectWithPin(pin);
 });
+
+renderTrustedHosts();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(console.error));

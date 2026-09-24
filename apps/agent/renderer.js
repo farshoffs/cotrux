@@ -3,14 +3,24 @@ const $ = selector => document.querySelector(selector);
 const els = {
   statePill: $("#statePill"),
   stateText: $("#stateText"),
+  computerName: $("#computerName"),
   pin: $("#pin"),
   newPinBtn: $("#newPinBtn"),
   copyPinBtn: $("#copyPinBtn"),
+  unattendedToggle: $("#unattendedToggle"),
+  startupToggle: $("#startupToggle"),
+  trustedSummary: $("#trustedSummary"),
+  trustedList: $("#trustedList"),
+  revokeAllBtn: $("#revokeAllBtn"),
   requestCard: $("#requestCard"),
   requestName: $("#requestName"),
+  trustRequestRow: $("#trustRequestRow"),
+  trustRequest: $("#trustRequest"),
   rejectBtn: $("#rejectBtn"),
   acceptBtn: $("#acceptBtn"),
   sessionCard: $("#sessionCard"),
+  sessionTitle: $("#sessionTitle"),
+  sessionText: $("#sessionText"),
   preview: $("#preview"),
   stopBtn: $("#stopBtn"),
   signalUrl: $("#signalUrl"),
@@ -25,19 +35,16 @@ let ws;
 let pc;
 let controlChannel;
 let captureStream;
+let reconnectTimer;
 let currentPin = "";
 let pendingRequestId = "";
+let pendingControllerId = "";
+let pendingControllerName = "";
 let pendingCandidates = [];
 let sessionActive = false;
-
-const settings = JSON.parse(localStorage.getItem("cotrux.agent.settings") || "{}");
-const deviceId = localStorage.getItem("cotrux.deviceId") || crypto.randomUUID();
-localStorage.setItem("cotrux.deviceId", deviceId);
-
-els.signalUrl.value = settings.signalUrl || "ws://localhost:8787/ws";
-els.turnUrl.value = settings.turnUrl || "";
-els.turnUser.value = settings.turnUser || "";
-els.turnPass.value = settings.turnPass || "";
+let shuttingDown = false;
+let config;
+let pendingTrustGrant = null;
 
 function generatePin() {
   const bytes = new Uint32Array(1);
@@ -45,19 +52,22 @@ function generatePin() {
   return String(bytes[0] % 1000000).padStart(6, "0");
 }
 
+function generateToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function hashToken(token) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function setState(text, state = "idle") {
   els.stateText.textContent = text;
   els.statePill.dataset.state = state;
-}
-
-function saveSettings() {
-  localStorage.setItem("cotrux.agent.settings", JSON.stringify({
-    signalUrl: els.signalUrl.value.trim(),
-    turnUrl: els.turnUrl.value.trim(),
-    turnUser: els.turnUser.value.trim(),
-    turnPass: els.turnPass.value
-  }));
-  setState("Settings saved", "ready");
 }
 
 function getIceServers() {
@@ -77,18 +87,67 @@ function sendWs(payload) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
 }
 
+function syncHostSettings() {
+  sendWs({
+    type: "host-settings",
+    unattendedEnabled: config.unattendedEnabled,
+    trustedDevices: config.trustedDevices
+  });
+}
+
 function registerHost() {
   if (ws?.readyState !== WebSocket.OPEN) return;
   sendWs({
     type: "host-register",
     pin: currentPin,
-    deviceId,
-    name: navigator.platform || "Cotrux computer"
+    deviceId: config.deviceId,
+    name: config.computerName || "Cotrux computer",
+    unattendedEnabled: config.unattendedEnabled,
+    trustedDevices: config.trustedDevices
   });
 }
 
 function renderPin() {
   els.pin.textContent = currentPin.slice(0, 3) + " " + currentPin.slice(3);
+}
+
+function renderTrustedDevices() {
+  const devices = config.trustedDevices || [];
+  els.trustedSummary.textContent = devices.length ? devices.length + (devices.length === 1 ? " trusted device" : " trusted devices") : "None yet";
+  els.revokeAllBtn.disabled = devices.length === 0;
+
+  if (!devices.length) {
+    els.trustedList.innerHTML = '<div class="empty-trusted">Approve a controller once and tick “Trust this controller” to add it here.</div>';
+    return;
+  }
+
+  els.trustedList.innerHTML = "";
+  for (const device of devices) {
+    const row = document.createElement("div");
+    row.className = "trusted-device";
+
+    const meta = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = device.name || "Trusted controller";
+    const added = document.createElement("span");
+    added.textContent = device.addedAt ? "Trusted " + new Date(device.addedAt).toLocaleDateString() : "Trusted controller";
+    meta.append(name, added);
+
+    const button = document.createElement("button");
+    button.className = "ghost compact";
+    button.type = "button";
+    button.textContent = "Revoke";
+    button.addEventListener("click", async () => {
+      config.trustedDevices = config.trustedDevices.filter(item => item.controllerId !== device.controllerId);
+      config = { ...config, ...(await window.cotrux.saveConfig({ trustedDevices: config.trustedDevices })) };
+      renderTrustedDevices();
+      syncHostSettings();
+      setState("Access revoked", "ready");
+    });
+
+    row.append(meta, button);
+    els.trustedList.append(row);
+  }
 }
 
 function newPin() {
@@ -98,15 +157,38 @@ function newPin() {
   registerHost();
 }
 
+async function saveNetworkSettings(reconnect = false) {
+  config = {
+    ...config,
+    ...(await window.cotrux.saveConfig({
+      signalUrl: els.signalUrl.value.trim(),
+      turnUrl: els.turnUrl.value.trim(),
+      turnUser: els.turnUser.value.trim(),
+      turnPass: els.turnPass.value
+    }))
+  };
+  setState("Settings saved", "ready");
+  if (reconnect) connectSignal();
+}
+
+function scheduleReconnect() {
+  if (shuttingDown || reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectSignal();
+  }, 4000);
+}
+
 function connectSignal() {
-  saveSettings();
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
   teardownPeer();
 
   try { ws?.close(); } catch {}
 
   const url = els.signalUrl.value.trim();
   if (!url) {
-    setState("Add signaling URL", "error");
+    setState("Server address missing", "error");
     return;
   }
 
@@ -115,12 +197,13 @@ function connectSignal() {
   try {
     ws = new WebSocket(url);
   } catch {
-    setState("Bad signaling URL", "error");
+    setState("Bad server address", "error");
+    scheduleReconnect();
     return;
   }
 
   ws.onopen = () => {
-    setState("Online", "ready");
+    setState(config.unattendedEnabled ? "Ready · unattended on" : "Ready", "ready");
     registerHost();
   };
 
@@ -129,7 +212,7 @@ function connectSignal() {
     try { msg = JSON.parse(event.data); } catch { return; }
 
     if (msg.type === "host-registered") {
-      setState("Ready", "ready");
+      setState(config.unattendedEnabled ? "Ready · unattended on" : "Ready", "ready");
       return;
     }
 
@@ -138,8 +221,13 @@ function connectSignal() {
         sendWs({ type: "host-reject", requestId: msg.requestId });
         return;
       }
+
       pendingRequestId = msg.requestId;
-      els.requestName.textContent = msg.controllerName || "Cotrux controller";
+      pendingControllerId = msg.controllerId || "";
+      pendingControllerName = msg.controllerName || "Cotrux controller";
+      els.requestName.textContent = pendingControllerName;
+      els.trustRequest.checked = Boolean(config.unattendedEnabled && msg.wantsTrust && pendingControllerId);
+      els.trustRequestRow.classList.toggle("hidden", !config.unattendedEnabled || !pendingControllerId);
       els.requestCard.classList.remove("hidden");
       setState("Approval needed", "pending");
       return;
@@ -148,6 +236,15 @@ function connectSignal() {
     if (msg.type === "paired") {
       els.requestCard.classList.add("hidden");
       pendingRequestId = "";
+
+      if (msg.unattended) {
+        els.sessionTitle.textContent = "Trusted controller connected";
+        els.sessionText.textContent = (msg.controllerName || "A trusted controller") + " connected using unattended access.";
+      } else {
+        els.sessionTitle.textContent = "Remote control is on";
+        els.sessionText.textContent = "Your primary display is being shared. Mouse, keyboard and clipboard commands can be received.";
+      }
+
       try {
         await startSession();
       } catch (error) {
@@ -184,9 +281,12 @@ function connectSignal() {
     }
   };
 
-  ws.onerror = () => setState("Signal offline", "error");
+  ws.onerror = () => setState("Server connection problem", "error");
   ws.onclose = () => {
-    if (!sessionActive) setState("Offline", "error");
+    if (!shuttingDown) {
+      if (!sessionActive) setState("Reconnecting…", "pending");
+      scheduleReconnect();
+    }
   };
 }
 
@@ -216,7 +316,19 @@ async function createPeer() {
   controlChannel.onopen = () => {
     sessionActive = true;
     setState("Live", "live");
+
+    if (pendingTrustGrant) {
+      controlChannel.send(JSON.stringify({
+        kind: "cotrux-trust-grant",
+        deviceId: config.deviceId,
+        hostName: config.computerName || "Cotrux computer",
+        controllerId: pendingTrustGrant.controllerId,
+        token: pendingTrustGrant.token
+      }));
+      pendingTrustGrant = null;
+    }
   };
+
   controlChannel.onmessage = async event => {
     try {
       const payload = JSON.parse(event.data);
@@ -233,9 +345,7 @@ async function prepareCapture() {
   if (captureStream?.active) return captureStream;
 
   captureStream = await navigator.mediaDevices.getDisplayMedia({
-    video: {
-      frameRate: { ideal: 30, max: 60 }
-    },
+    video: { frameRate: { ideal: 30, max: 60 } },
     audio: false
   });
 
@@ -254,6 +364,7 @@ async function startSession() {
 
   els.sessionCard.classList.remove("hidden");
   els.newPinBtn.disabled = true;
+  els.unattendedToggle.disabled = true;
   setState("Negotiating", "pending");
 
   const offer = await pc.createOffer();
@@ -280,6 +391,7 @@ async function handleSignal(data) {
 
 function teardownPeer() {
   sessionActive = false;
+
   if (controlChannel) {
     try { controlChannel.close(); } catch {}
   }
@@ -301,10 +413,17 @@ function teardownPeer() {
 function stopSession(notify = true) {
   if (notify) sendWs({ type: "session-end" });
   teardownPeer();
+  pendingTrustGrant = null;
   els.sessionCard.classList.add("hidden");
   els.requestCard.classList.add("hidden");
   els.newPinBtn.disabled = false;
-  setState(ws?.readyState === WebSocket.OPEN ? "Ready" : "Offline", ws?.readyState === WebSocket.OPEN ? "ready" : "error");
+  els.unattendedToggle.disabled = false;
+  setState(
+    ws?.readyState === WebSocket.OPEN
+      ? (config.unattendedEnabled ? "Ready · unattended on" : "Ready")
+      : "Reconnecting…",
+    ws?.readyState === WebSocket.OPEN ? "ready" : "pending"
+  );
 
   currentPin = generatePin();
   renderPin();
@@ -320,11 +439,39 @@ els.acceptBtn.addEventListener("click", async () => {
 
   try {
     await prepareCapture();
-    sendWs({ type: "host-accept", requestId });
+
+    let trustedController;
+    if (config.unattendedEnabled && els.trustRequest.checked && pendingControllerId) {
+      const token = generateToken();
+      const tokenHash = await hashToken(token);
+      const trustedRecord = {
+        controllerId: pendingControllerId,
+        name: pendingControllerName,
+        tokenHash,
+        addedAt: Date.now()
+      };
+
+      config.trustedDevices = [
+        ...config.trustedDevices.filter(item => item.controllerId !== pendingControllerId),
+        trustedRecord
+      ].slice(-50);
+
+      config = { ...config, ...(await window.cotrux.saveConfig({ trustedDevices: config.trustedDevices })) };
+      renderTrustedDevices();
+      pendingTrustGrant = { controllerId: pendingControllerId, token };
+      trustedController = trustedRecord;
+    }
+
+    sendWs({
+      type: "host-accept",
+      requestId,
+      trustedController
+    });
   } catch (error) {
     console.error("Screen capture cancelled", error);
     sendWs({ type: "host-reject", requestId });
     pendingRequestId = "";
+    pendingTrustGrant = null;
     els.requestCard.classList.add("hidden");
     setState("Ready", "ready");
   } finally {
@@ -336,24 +483,78 @@ els.rejectBtn.addEventListener("click", () => {
   if (!pendingRequestId) return;
   sendWs({ type: "host-reject", requestId: pendingRequestId });
   pendingRequestId = "";
+  pendingControllerId = "";
+  pendingTrustGrant = null;
   els.requestCard.classList.add("hidden");
-  setState("Ready", "ready");
+  setState(config.unattendedEnabled ? "Ready · unattended on" : "Ready", "ready");
 });
 
 els.stopBtn.addEventListener("click", () => stopSession(true));
 els.newPinBtn.addEventListener("click", newPin);
+
 els.copyPinBtn.addEventListener("click", async () => {
   await window.cotrux.control({ kind: "clipboard", text: currentPin });
   setState("PIN copied", "ready");
 });
-els.reconnectBtn.addEventListener("click", connectSignal);
-els.saveAdvancedBtn.addEventListener("click", saveSettings);
+
+els.unattendedToggle.addEventListener("change", async () => {
+  config.unattendedEnabled = els.unattendedToggle.checked;
+  config = { ...config, ...(await window.cotrux.saveConfig({ unattendedEnabled: config.unattendedEnabled })) };
+  syncHostSettings();
+  setState(config.unattendedEnabled ? "Unattended access on" : "Unattended access off", "ready");
+});
+
+els.startupToggle.addEventListener("change", async () => {
+  const startup = await window.cotrux.setStartup(els.startupToggle.checked);
+  els.startupToggle.checked = Boolean(startup.enabled);
+  if (!startup.supported) setState("Startup setting not supported on this OS", "error");
+  else setState(startup.enabled ? "Starts with computer" : "Startup disabled", "ready");
+});
+
+els.revokeAllBtn.addEventListener("click", async () => {
+  if (!config.trustedDevices.length) return;
+  if (!window.confirm("Revoke unattended access for all trusted controllers?")) return;
+  config.trustedDevices = [];
+  config = { ...config, ...(await window.cotrux.saveConfig({ trustedDevices: [] })) };
+  renderTrustedDevices();
+  syncHostSettings();
+  setState("All trusted access revoked", "ready");
+});
+
+els.reconnectBtn.addEventListener("click", async () => {
+  await saveNetworkSettings(false);
+  connectSignal();
+});
+
+els.saveAdvancedBtn.addEventListener("click", () => saveNetworkSettings(false));
 
 window.addEventListener("beforeunload", () => {
+  shuttingDown = true;
+  clearTimeout(reconnectTimer);
   try { sendWs({ type: "session-end" }); } catch {}
   teardownPeer();
 });
 
-currentPin = generatePin();
-renderPin();
-connectSignal();
+async function init() {
+  config = await window.cotrux.getConfig();
+  config.trustedDevices = Array.isArray(config.trustedDevices) ? config.trustedDevices : [];
+
+  els.computerName.textContent = config.computerName || "Desktop agent";
+  els.signalUrl.value = config.signalUrl || "wss://cotrux-production.up.railway.app/ws";
+  els.turnUrl.value = config.turnUrl || "";
+  els.turnUser.value = config.turnUser || "";
+  els.turnPass.value = config.turnPass || "";
+  els.unattendedToggle.checked = Boolean(config.unattendedEnabled);
+  els.startupToggle.checked = Boolean(config.startup?.enabled);
+  els.startupToggle.disabled = config.startup?.supported === false;
+
+  renderTrustedDevices();
+  currentPin = generatePin();
+  renderPin();
+  connectSignal();
+}
+
+init().catch(error => {
+  console.error(error);
+  setState("Startup failed", "error");
+});

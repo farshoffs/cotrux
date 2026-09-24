@@ -14,19 +14,53 @@
         <div class="brand-mark">C</div>
         <div>
           <strong>Cotrux</strong>
-          <span>Desktop agent</span>
+          <span id="computerName">Desktop agent</span>
         </div>
       </div>
       <div id="statePill" class="pill" data-state="idle"><span></span><b id="stateText">Starting</b></div>
     </header>
 
+    <section class="access-card">
+      <div class="section-head split">
+        <div>
+          <span class="eyebrow">UNATTENDED ACCESS</span>
+          <h1>Connect without a PIN.</h1>
+          <p>Turn this on once, approve a controller as trusted, and that device can reconnect later without asking at the computer.</p>
+        </div>
+        <label class="switch" aria-label="Enable unattended access">
+          <input id="unattendedToggle" type="checkbox" />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="startup-row">
+        <div>
+          <strong>Start Cotrux with this computer</strong>
+          <span>Keeps this PC reachable after you sign in.</span>
+        </div>
+        <label class="switch small" aria-label="Start Cotrux with computer">
+          <input id="startupToggle" type="checkbox" />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="trusted-head">
+        <div>
+          <strong>Trusted controllers</strong>
+          <span id="trustedSummary">None yet</span>
+        </div>
+        <button id="revokeAllBtn" class="ghost compact" type="button">Revoke all</button>
+      </div>
+      <div id="trustedList" class="trusted-list"></div>
+    </section>
+
     <section class="pin-card">
-      <span class="eyebrow">YOUR CONNECTION PIN</span>
+      <span class="eyebrow">PAIR A NEW CONTROLLER</span>
       <div id="pin" class="pin">------</div>
-      <p>Share this PIN only with the device you want to use. You still approve every incoming session.</p>
+      <p>Use this PIN only for the first connection from a new browser or phone. You choose whether that controller becomes trusted.</p>
       <div class="pin-actions">
-        <button id="newPinBtn" class="ghost">New PIN</button>
-        <button id="copyPinBtn" class="ghost">Copy PIN</button>
+        <button id="newPinBtn" class="ghost" type="button">New PIN</button>
+        <button id="copyPinBtn" class="ghost" type="button">Copy PIN</button>
       </div>
     </section>
 
@@ -37,9 +71,16 @@
         <h2 id="requestName">Cotrux controller</h2>
         <p>This device is asking to see and control your primary screen.</p>
       </div>
+      <label id="trustRequestRow" class="trust-option">
+        <input id="trustRequest" type="checkbox" checked />
+        <span>
+          <strong>Trust this controller</strong>
+          <small>Future connections from this controller won't need a PIN or approval.</small>
+        </span>
+      </label>
       <div class="request-actions">
-        <button id="rejectBtn" class="ghost">Reject</button>
-        <button id="acceptBtn" class="primary">Allow session</button>
+        <button id="rejectBtn" class="ghost" type="button">Reject</button>
+        <button id="acceptBtn" class="primary" type="button">Allow session</button>
       </div>
     </section>
 
@@ -47,46 +88,39 @@
       <div class="live-row">
         <div>
           <span class="eyebrow">SESSION ACTIVE</span>
-          <h2>Remote control is on</h2>
-          <p>Your primary display is being shared. Mouse, keyboard and clipboard commands can be received.</p>
+          <h2 id="sessionTitle">Remote control is on</h2>
+          <p id="sessionText">Your primary display is being shared. Mouse, keyboard and clipboard commands can be received.</p>
         </div>
         <span class="live-badge">LIVE</span>
       </div>
       <div class="preview-wrap">
         <video id="preview" autoplay muted playsinline></video>
       </div>
-      <button id="stopBtn" class="danger">Stop remote session</button>
+      <button id="stopBtn" class="danger" type="button">Stop remote session</button>
     </section>
 
     <section class="settings">
-      <div class="section-head">
-        <div>
-          <span class="eyebrow">NETWORK</span>
-          <h2>Signaling service</h2>
-        </div>
-      </div>
-      <label for="signalUrl">WebSocket URL</label>
-      <div class="inline">
-        <input id="signalUrl" spellcheck="false" placeholder="ws://localhost:8787/ws" />
-        <button id="reconnectBtn" class="ghost">Reconnect</button>
-      </div>
-
       <details>
-        <summary>TURN / advanced</summary>
+        <summary>Advanced network settings</summary>
         <div class="details-grid">
+          <label for="signalUrl">Cotrux server</label>
+          <div class="inline">
+            <input id="signalUrl" spellcheck="false" placeholder="wss://cotrux-production.up.railway.app/ws" />
+            <button id="reconnectBtn" class="ghost" type="button">Reconnect</button>
+          </div>
           <label for="turnUrl">TURN URL</label>
-          <input id="turnUrl" spellcheck="false" placeholder="turn:turn.example.com:3478" />
+          <input id="turnUrl" spellcheck="false" placeholder="Optional TURN server" />
           <label for="turnUser">TURN username</label>
           <input id="turnUser" />
           <label for="turnPass">TURN credential</label>
           <input id="turnPass" type="password" />
-          <button id="saveAdvancedBtn" class="ghost">Save network settings</button>
+          <button id="saveAdvancedBtn" class="ghost full" type="button">Save network settings</button>
         </div>
       </details>
     </section>
 
     <footer>
-      Cotrux never starts a session without approval in this MVP.
+      Unattended access is off until you enable it. Cotrux remains visible in the system tray while running.
     </footer>
   </main>
 

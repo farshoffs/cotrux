@@ -1,21 +1,101 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, screen, session } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, Menu, nativeImage, screen, session, Tray } from "electron";
 import { mouse, keyboard, Button, Key, Point } from "@nut-tree-fork/nut-js";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_SIGNAL_URL = "wss://cotrux-production.up.railway.app/ws";
 
 mouse.config.mouseSpeed = 2200;
 keyboard.config.autoDelayMs = 0;
 
 let mainWindow;
+let tray;
+let quitting = false;
+
+function configPath() {
+  return path.join(app.getPath("userData"), "cotrux-config.json");
+}
+
+function readConfig() {
+  let stored = {};
+  try {
+    stored = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+  } catch {}
+
+  const next = {
+    deviceId: typeof stored.deviceId === "string" && stored.deviceId ? stored.deviceId : crypto.randomUUID(),
+    signalUrl: typeof stored.signalUrl === "string" && stored.signalUrl ? stored.signalUrl : DEFAULT_SIGNAL_URL,
+    turnUrl: typeof stored.turnUrl === "string" ? stored.turnUrl : "",
+    turnUser: typeof stored.turnUser === "string" ? stored.turnUser : "",
+    turnPass: typeof stored.turnPass === "string" ? stored.turnPass : "",
+    unattendedEnabled: Boolean(stored.unattendedEnabled),
+    trustedDevices: Array.isArray(stored.trustedDevices) ? stored.trustedDevices.slice(0, 50) : []
+  };
+
+  if (JSON.stringify(next) !== JSON.stringify(stored)) {
+    fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+    fs.writeFileSync(configPath(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  }
+  return next;
+}
+
+function saveConfigPatch(patch = {}) {
+  const current = readConfig();
+  const next = { ...current };
+
+  for (const key of ["signalUrl", "turnUrl", "turnUser", "turnPass"]) {
+    if (typeof patch[key] === "string") next[key] = patch[key].slice(0, key === "turnPass" ? 512 : 1024);
+  }
+  if (typeof patch.unattendedEnabled === "boolean") next.unattendedEnabled = patch.unattendedEnabled;
+
+  if (Array.isArray(patch.trustedDevices)) {
+    next.trustedDevices = patch.trustedDevices.slice(0, 50).map(item => ({
+      controllerId: String(item?.controllerId || "").slice(0, 128),
+      name: String(item?.name || "Trusted controller").slice(0, 80),
+      tokenHash: String(item?.tokenHash || "").toLowerCase().slice(0, 64),
+      addedAt: Number(item?.addedAt || Date.now())
+    })).filter(item => item.controllerId && /^[a-f0-9]{64}$/.test(item.tokenHash));
+  }
+
+  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  return next;
+}
+
+function startAtLoginSupported() {
+  return process.platform === "win32" || process.platform === "darwin";
+}
+
+function getStartupState() {
+  if (!startAtLoginSupported()) return { supported: false, enabled: false };
+  try {
+    return { supported: true, enabled: Boolean(app.getLoginItemSettings().openAtLogin) };
+  } catch {
+    return { supported: false, enabled: false };
+  }
+}
+
+function setStartupState(enabled) {
+  if (!startAtLoginSupported()) return getStartupState();
+  app.setLoginItemSettings({
+    openAtLogin: Boolean(enabled),
+    args: enabled && process.platform === "win32" ? ["--hidden"] : []
+  });
+  return getStartupState();
+}
 
 function createWindow() {
+  const hiddenStartup = process.argv.includes("--hidden");
   mainWindow = new BrowserWindow({
-    width: 620,
-    height: 760,
-    minWidth: 520,
-    minHeight: 650,
+    width: 680,
+    height: 850,
+    minWidth: 540,
+    minHeight: 680,
+    show: !hiddenStartup,
     backgroundColor: "#090b10",
     title: "Cotrux",
     webPreferences: {
@@ -28,6 +108,37 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile("index.html");
+
+  mainWindow.on("close", event => {
+    if (quitting) return;
+    event.preventDefault();
+    mainWindow.hide();
+  });
+}
+
+function showWindow() {
+  if (!mainWindow) return;
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAhUlEQVR42mNgoBvgP4P///8ZGBj+M8AAQ4wMDAz/GRgY/jMwMDAwMjIy/GeAAQYGBob/DDAwMDD8Z2BgYGD4zwADDDEyMjL8Z4ABBhkZGRn+MzAwMDD8Z4ABhhgZGxn+MzAwMDD8ZwABDDEyMjL8Z4ABBhkZGRn+MzAwMDD8Z4ABBgYGhv8MAAAJtCEfOJLaewAAAABJRU5ErkJggg==";
+  const icon = nativeImage.createFromDataURL("data:image/png;base64," + png);
+  tray = new Tray(icon);
+  tray.setToolTip("Cotrux Remote");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Open Cotrux", click: showWindow },
+    { type: "separator" },
+    {
+      label: "Quit Cotrux",
+      click: () => {
+        quitting = true;
+        app.quit();
+      }
+    }
+  ]));
+  tray.on("click", showWindow);
 }
 
 function buttonFromName(name) {
@@ -174,13 +285,30 @@ app.whenReady().then(() => {
     };
   });
 
+  ipcMain.handle("cotrux:get-config", () => ({
+    ...readConfig(),
+    computerName: os.hostname(),
+    startup: getStartupState()
+  }));
+
+  ipcMain.handle("cotrux:save-config", (_event, patch) => saveConfigPatch(patch));
+  ipcMain.handle("cotrux:set-startup", (_event, enabled) => setStartupState(enabled));
+  ipcMain.handle("cotrux:show-window", showWindow);
+
   createWindow();
+  createTray();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    showWindow();
   });
 });
 
+app.on("before-quit", () => {
+  quitting = true;
+});
+
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform === "darwin") return;
+  if (quitting) app.quit();
 });
