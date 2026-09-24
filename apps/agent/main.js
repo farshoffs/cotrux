@@ -11,8 +11,13 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 const DEFAULT_SIGNAL_URL = "wss://cotrux-production.up.railway.app/ws";
+const LATEST_WINDOWS_INSTALLER = "https://github.com/farshoffs/cotrux/releases/download/desktop-latest/Cotrux-Setup.exe";
 const isBackgroundWorkspace = process.argv.includes("--background-workspace");
+const isWorkspaceBootstrap = process.argv.includes("--workspace-bootstrap");
 const dataDirArg = process.argv.find(arg => arg.startsWith("--data-dir="));
+const signalUrlArg = process.argv.find(arg => arg.startsWith("--signal-url="));
+const pairingPinArg = process.argv.find(arg => arg.startsWith("--pairing-pin="));
+const displayNameArg = process.argv.find(arg => arg.startsWith("--display-name="));
 
 if (dataDirArg) {
   const customDataDir = decodeURIComponent(dataDirArg.slice("--data-dir=".length));
@@ -125,6 +130,11 @@ function workspaceStatePath() {
 
 const WORKSPACE_VM_NAME = "Cotrux Persistent Workspace";
 
+function generatePairingPin() {
+  const bytes = crypto.randomBytes(4);
+  return String(bytes.readUInt32BE(0) % 1000000).padStart(6, "0");
+}
+
 function ensureWorkspaceState() {
   const existing = readJsonFile(workspaceStatePath(), {});
   const state = {
@@ -133,6 +143,9 @@ function ensureWorkspaceState() {
     vhdPath: typeof existing.vhdPath === "string" && existing.vhdPath
       ? existing.vhdPath
       : path.join(workspaceRoot(), "Cotrux-Persistent-Workspace.vhdx"),
+    pairingPin: /^\d{6}$/.test(String(existing.pairingPin || "")) ? String(existing.pairingPin) : "",
+    guestUsername: typeof existing.guestUsername === "string" ? existing.guestUsername.slice(0, 120) : "",
+    provisionedAt: Number(existing.provisionedAt || 0),
     createdAt: Number(existing.createdAt || Date.now())
   };
   writeJsonFile(workspaceStatePath(), state);
@@ -165,12 +178,31 @@ async function runHyperVHelper(action, extra = {}) {
     "-ResultPath", resultPath
   ];
 
+  if (typeof extra.guestUsername === "string" && extra.guestUsername) {
+    args.push("-GuestUsername", extra.guestUsername);
+  }
+  if (typeof extra.signalUrl === "string" && extra.signalUrl) {
+    args.push("-SignalUrl", extra.signalUrl);
+  }
+  if (typeof extra.pairingPin === "string" && extra.pairingPin) {
+    args.push("-PairingPin", extra.pairingPin);
+  }
+  if (typeof extra.installerUrl === "string" && extra.installerUrl) {
+    args.push("-InstallerUrl", extra.installerUrl);
+  }
+
   try {
     await execFileAsync("powershell.exe", args, {
       windowsHide: true,
-      timeout: action === "create" || action === "enable" ? 10 * 60 * 1000 : 90 * 1000,
+      timeout: action === "create" || action === "enable" || action === "provision"
+        ? 15 * 60 * 1000
+        : 90 * 1000,
       encoding: "utf8",
-      maxBuffer: 1024 * 1024
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        COTRUX_GUEST_PASSWORD: typeof extra.guestPassword === "string" ? extra.guestPassword : ""
+      }
     });
   } catch (error) {
     if (!fs.existsSync(resultPath)) {
@@ -228,6 +260,10 @@ async function getBackgroundWorkspaceStatus() {
     automaticStartAction: hv.automaticStartAction || "",
     automaticStopAction: hv.automaticStopAction || "",
     edition: hv.edition || "",
+    provisioned: Boolean(state.provisionedAt),
+    provisionedAt: state.provisionedAt || 0,
+    guestUsername: state.guestUsername || "",
+    pairingPin: state.pairingPin || "",
     error: hv.ok === false ? hv.error : "",
     reason: hv.exists
       ? (hv.running ? "Persistent Workspace is running independently of the physical desktop." : "Persistent Workspace is saved. Its VHDX, apps and files are still intact.")
@@ -300,6 +336,49 @@ async function openWindowsDownload() {
   await shell.openExternal("https://www.microsoft.com/software-download/windows11");
   return { ok: true };
 }
+
+async function provisionWorkspaceGuest(credentials = {}) {
+  const status = await getBackgroundWorkspaceStatus();
+  if (!status.configured) return { ...status, error: "Create the Persistent Workspace first." };
+
+  const guestUsername = String(credentials.username || "").trim().slice(0, 120);
+  const guestPassword = String(credentials.password || "");
+  if (!guestUsername || !guestPassword) {
+    return { ...status, error: "Enter the Windows username and password used inside the workspace." };
+  }
+
+  if (!status.running) {
+    const started = await runHyperVHelper("start");
+    if (!started.ok) return { ...status, error: started.error || "Could not start the workspace." };
+  }
+
+  const state = ensureWorkspaceState();
+  const pairingPin = state.pairingPin || generatePairingPin();
+  const hostConfig = readConfig();
+
+  const result = await runHyperVHelper("provision", {
+    guestUsername,
+    guestPassword,
+    signalUrl: hostConfig.signalUrl || DEFAULT_SIGNAL_URL,
+    pairingPin,
+    installerUrl: LATEST_WINDOWS_INSTALLER
+  });
+
+  if (result.ok) {
+    state.pairingPin = pairingPin;
+    state.guestUsername = guestUsername;
+    state.provisionedAt = Date.now();
+    writeJsonFile(workspaceStatePath(), state);
+  }
+
+  const updated = await getBackgroundWorkspaceStatus();
+  return {
+    ...updated,
+    provisionResult: result,
+    error: result.ok ? "" : (result.error || "Guest provisioning failed.")
+  };
+}
+
 
 
 function createWindow() {
@@ -469,6 +548,17 @@ async function applyControl(event) {
 }
 
 app.whenReady().then(() => {
+  if (isWorkspaceBootstrap) {
+    const bootstrapPatch = {
+      unattendedEnabled: true,
+      backgroundWorkspace: true,
+      signalUrl: signalUrlArg ? decodeURIComponent(signalUrlArg.slice("--signal-url=".length)) : DEFAULT_SIGNAL_URL,
+      pairingPin: pairingPinArg ? pairingPinArg.slice("--pairing-pin=".length) : "",
+      displayName: displayNameArg ? decodeURIComponent(displayNameArg.slice("--display-name=".length)) : "Cotrux Persistent Workspace"
+    };
+    saveConfigPatch(bootstrapPatch);
+  }
+
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
@@ -520,6 +610,7 @@ app.whenReady().then(() => {
   ipcMain.handle("cotrux:workspace-enable-hyperv", enableHyperV);
   ipcMain.handle("cotrux:workspace-choose-iso", chooseWorkspaceIso);
   ipcMain.handle("cotrux:workspace-download-windows", openWindowsDownload);
+  ipcMain.handle("cotrux:workspace-provision", (_event, credentials) => provisionWorkspaceGuest(credentials));
 
   createWindow();
   createTray();
