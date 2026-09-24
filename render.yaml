@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: cotrux
+    runtime: docker
+    region: singapore
+    dockerfilePath: ./services/signal/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: TRUST_PROXY
+        value: "1"
