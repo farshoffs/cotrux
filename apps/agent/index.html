@@ -57,9 +57,11 @@
           <div class="provision-grid">
             <label for="workspaceGuestUser">Windows username inside workspace</label>
             <input id="workspaceGuestUser" autocomplete="username" placeholder="e.g. Farhan" />
-            <label for="workspaceGuestPass">Windows password inside workspace</label>
-            <input id="workspaceGuestPass" type="password" autocomplete="current-password" placeholder="Used once, never stored" />
+            <label for="workspaceGuestPass">Windows account password inside workspace</label>
+            <input id="workspaceGuestPass" type="password" autocomplete="current-password" placeholder="Account password — not Windows Hello PIN" />
+            <small class="credential-help">Windows Hello PIN cannot be used by Hyper-V PowerShell Direct. Enter the actual Windows account password. If this VM only uses a PIN or has no password, use the fallback below.</small>
             <button id="provisionWorkspaceBtn" class="primary full" type="button">Install &amp; Configure Cotrux</button>
+            <button id="prepareGuestSetupBtn" class="ghost full" type="button">I use Windows Hello PIN / no password</button>
           </div>
           <div id="workspacePairing" class="workspace-pairing hidden">
             <span class="eyebrow">WORKSPACE PAIRING PIN</span>
