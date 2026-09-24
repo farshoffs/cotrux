@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev:signal": "npm run dev -w @cotrux/signal",
-    "test:signal": "npm run test -w @cotrux/signal",
+    "test:signal": "npm test -w @cotrux/signal",
     "dev:controller": "npm run dev -w @cotrux/controller",
     "build:controller": "npm run build -w @cotrux/controller",
     "dev:agent": "npm run dev -w @cotrux/agent",
