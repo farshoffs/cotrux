@@ -23,29 +23,45 @@
     <section id="workspaceCard" class="workspace-card">
       <div class="section-head split">
         <div>
-          <span class="eyebrow">BACKGROUND WORKSPACE</span>
-          <h1>Work on a separate desktop.</h1>
-          <p>The person at this PC keeps using their normal desktop while Cotrux gives you a separate isolated Windows session to control remotely.</p>
+          <span class="eyebrow">PERSISTENT WORKSPACE</span>
+          <h1>A computer inside this computer.</h1>
+          <p>The physical user keeps their normal desktop. Cotrux runs a separate Hyper-V Windows VM with its own persistent disk, apps, files, mouse and keyboard.</p>
         </div>
-        <span id="workspaceBadge" class="workspace-badge" data-state="off">OFF</span>
+        <span id="workspaceBadge" class="workspace-badge" data-state="off">CHECKING</span>
       </div>
 
       <div id="workspaceReady" class="workspace-ready hidden">
-        <div class="workspace-pin-block">
-          <span class="eyebrow">WORKSPACE PAIRING PIN</span>
-          <strong id="workspacePin">------</strong>
-          <small>Needed only the first time. Trust the workspace from your controller for future PIN-free access.</small>
+        <div class="workspace-details">
+          <strong id="workspaceStateText">Persistent Workspace</strong>
+          <span id="workspaceDataPath">VHDX data is preserved.</span>
+          <small>Always-on policy: starts automatically with the host PC and saves its running state during host shutdown. Cotrux has no delete button for this VM.</small>
         </div>
         <div class="workspace-actions">
+          <button id="resumeWorkspaceBtn" class="primary" type="button">Start workspace</button>
           <button id="openWorkspaceBtn" class="ghost" type="button">Open locally</button>
-          <button id="stopWorkspaceBtn" class="danger-inline" type="button">Stop workspace</button>
+          <button id="stopWorkspaceBtn" class="danger-inline" type="button">Save &amp; stop</button>
+        </div>
+        <div class="workspace-guide">
+          <strong>One-time setup inside the VM</strong>
+          <span>Finish Windows installation, install Cotrux in the VM, then enable Unattended Access + Start Cotrux with this computer. It will appear in your controller as a separate computer.</span>
         </div>
       </div>
 
       <div id="workspaceSetup" class="workspace-setup">
-        <button id="startWorkspaceBtn" class="primary full" type="button">Start Background Workspace</button>
-        <p id="workspaceRequirement">Checking Windows Sandbox support…</p>
-        <button id="windowsFeaturesBtn" class="ghost full hidden" type="button">Open Windows Features</button>
+        <p id="workspaceRequirement">Checking Hyper-V support…</p>
+        <button id="windowsFeaturesBtn" class="primary full hidden" type="button">Enable Hyper-V</button>
+        <div id="workspaceIsoTools" class="workspace-iso-tools hidden">
+          <div class="iso-row">
+            <div>
+              <strong>Windows installation ISO</strong>
+              <span id="workspaceIsoName">No ISO selected</span>
+            </div>
+            <button id="chooseWorkspaceIsoBtn" class="ghost compact" type="button">Choose ISO</button>
+          </div>
+          <button id="downloadWindowsBtn" class="ghost full" type="button">Get Windows 11 ISO from Microsoft</button>
+          <button id="startWorkspaceBtn" class="primary full" type="button">Create Persistent Workspace</button>
+          <small class="workspace-license">Windows inside the VM requires its own valid licensing/activation. Cotrux creates the VM but does not provide a Windows license.</small>
+        </div>
       </div>
     </section>
 
