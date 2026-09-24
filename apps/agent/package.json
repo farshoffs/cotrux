@@ -1,6 +1,6 @@
 {
   "name": "@cotrux/agent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "main": "main.js",
@@ -56,6 +56,6 @@
       }
     ]
   },
-  "description": "Cotrux remote desktop host with trusted unattended access and persistent Hyper-V workspaces",
+  "description": "Cotrux remote desktop host with trusted unattended access, persistent Hyper-V workspaces and automatic guest provisioning",
   "author": "Cotrux"
 }
