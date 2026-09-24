@@ -146,6 +146,7 @@ function ensureWorkspaceState() {
     pairingPin: /^\d{6}$/.test(String(existing.pairingPin || "")) ? String(existing.pairingPin) : "",
     guestUsername: typeof existing.guestUsername === "string" ? existing.guestUsername.slice(0, 120) : "",
     provisionedAt: Number(existing.provisionedAt || 0),
+    bootstrapPreparedAt: Number(existing.bootstrapPreparedAt || 0),
     createdAt: Number(existing.createdAt || Date.now())
   };
   writeJsonFile(workspaceStatePath(), state);
@@ -262,6 +263,8 @@ async function getBackgroundWorkspaceStatus() {
     edition: hv.edition || "",
     provisioned: Boolean(state.provisionedAt),
     provisionedAt: state.provisionedAt || 0,
+    bootstrapPrepared: Boolean(state.bootstrapPreparedAt),
+    bootstrapPreparedAt: state.bootstrapPreparedAt || 0,
     guestUsername: state.guestUsername || "",
     pairingPin: state.pairingPin || "",
     error: hv.ok === false ? hv.error : "",
@@ -335,6 +338,40 @@ async function connectBackgroundWorkspace() {
 async function openWindowsDownload() {
   await shell.openExternal("https://www.microsoft.com/software-download/windows11");
   return { ok: true };
+}
+
+async function prepareWorkspaceGuestBootstrap() {
+  const status = await getBackgroundWorkspaceStatus();
+  if (!status.configured) return { ...status, error: "Create the Persistent Workspace first." };
+
+  if (!status.running) {
+    const started = await runHyperVHelper("start");
+    if (!started.ok) return { ...status, error: started.error || "Could not start the workspace." };
+  }
+
+  const state = ensureWorkspaceState();
+  const pairingPin = state.pairingPin || generatePairingPin();
+  const hostConfig = readConfig();
+
+  const result = await runHyperVHelper("prepare-bootstrap", {
+    signalUrl: hostConfig.signalUrl || DEFAULT_SIGNAL_URL,
+    pairingPin,
+    installerUrl: LATEST_WINDOWS_INSTALLER
+  });
+
+  if (result.ok) {
+    state.pairingPin = pairingPin;
+    state.bootstrapPreparedAt = Date.now();
+    writeJsonFile(workspaceStatePath(), state);
+    try { await connectBackgroundWorkspace(); } catch {}
+  }
+
+  const updated = await getBackgroundWorkspaceStatus();
+  return {
+    ...updated,
+    bootstrapResult: result,
+    error: result.ok ? "" : (result.error || "Could not prepare guest setup.")
+  };
 }
 
 async function provisionWorkspaceGuest(credentials = {}) {
@@ -557,6 +594,12 @@ app.whenReady().then(() => {
       displayName: displayNameArg ? decodeURIComponent(displayNameArg.slice("--display-name=".length)) : "Cotrux Persistent Workspace"
     };
     saveConfigPatch(bootstrapPatch);
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        args: ["--background-workspace", "--hidden"]
+      });
+    } catch {}
   }
 
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
@@ -611,6 +654,7 @@ app.whenReady().then(() => {
   ipcMain.handle("cotrux:workspace-choose-iso", chooseWorkspaceIso);
   ipcMain.handle("cotrux:workspace-download-windows", openWindowsDownload);
   ipcMain.handle("cotrux:workspace-provision", (_event, credentials) => provisionWorkspaceGuest(credentials));
+  ipcMain.handle("cotrux:workspace-prepare-bootstrap", prepareWorkspaceGuestBootstrap);
 
   createWindow();
   createTray();
