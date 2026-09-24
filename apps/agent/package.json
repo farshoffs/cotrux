@@ -12,8 +12,8 @@
     "@nut-tree-fork/nut-js": "^4.2.6"
   },
   "devDependencies": {
-    "electron": "^38.0.0",
-    "electron-builder": "^26.0.12"
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.cotrux.agent",
@@ -36,7 +36,9 @@
       "target": "nsis"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Utility"
     }
   }
