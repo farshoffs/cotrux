@@ -1,8 +1,12 @@
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev
-COPY server.js ./
+
+COPY services/signal/package.json ./services/signal/package.json
+RUN cd services/signal && npm install --omit=dev
+
+COPY services/signal/server.js ./services/signal/server.js
+COPY apps/controller ./apps/controller
+
 ENV PORT=8787
 EXPOSE 8787
-CMD ["node", "server.js"]
+CMD ["node", "services/signal/server.js"]
