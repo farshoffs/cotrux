@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld("cotrux", {
   workspaceEnableHyperV: () => ipcRenderer.invoke("cotrux:workspace-enable-hyperv"),
   workspaceChooseIso: () => ipcRenderer.invoke("cotrux:workspace-choose-iso"),
   workspaceDownloadWindows: () => ipcRenderer.invoke("cotrux:workspace-download-windows"),
-  workspaceProvision: credentials => ipcRenderer.invoke("cotrux:workspace-provision", credentials)
+  workspaceProvision: credentials => ipcRenderer.invoke("cotrux:workspace-provision", credentials),
+  workspacePrepareBootstrap: () => ipcRenderer.invoke("cotrux:workspace-prepare-bootstrap")
 });
