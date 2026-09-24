@@ -20,6 +20,15 @@ const els = {
   openWorkspaceBtn: $("#openWorkspaceBtn"),
   stopWorkspaceBtn: $("#stopWorkspaceBtn"),
   windowsFeaturesBtn: $("#windowsFeaturesBtn"),
+  workspaceProvision: $("#workspaceProvision"),
+  workspaceProvisionTitle: $("#workspaceProvisionTitle"),
+  workspaceProvisionText: $("#workspaceProvisionText"),
+  workspaceProvisionBadge: $("#workspaceProvisionBadge"),
+  workspaceGuestUser: $("#workspaceGuestUser"),
+  workspaceGuestPass: $("#workspaceGuestPass"),
+  provisionWorkspaceBtn: $("#provisionWorkspaceBtn"),
+  workspacePairing: $("#workspacePairing"),
+  workspacePairingPin: $("#workspacePairingPin"),
   accessCard: $("#accessCard"),
   pin: $("#pin"),
   newPinBtn: $("#newPinBtn"),
@@ -236,6 +245,26 @@ async function renderWorkspaceStatus(status) {
   els.resumeWorkspaceBtn.classList.toggle("hidden", Boolean(status.running));
   els.openWorkspaceBtn.disabled = false;
   els.stopWorkspaceBtn.disabled = !status.running;
+
+  els.workspaceProvision.classList.remove("hidden");
+  els.workspaceGuestUser.value = status.guestUsername || els.workspaceGuestUser.value || "";
+  els.workspaceProvisionBadge.textContent = status.provisioned ? "READY" : "SETUP";
+  els.workspaceProvisionBadge.dataset.state = status.provisioned ? "ready" : "setup";
+  els.workspaceProvisionTitle.textContent = status.provisioned
+    ? "Cotrux is provisioned inside the workspace"
+    : "Provision Cotrux automatically";
+  els.workspaceProvisionText.textContent = status.provisioned
+    ? "Re-enter the guest password only if you want to reinstall/update Cotrux. The password is never stored."
+    : "Use the Windows account you created inside the VM. Cotrux uses it once through Hyper-V PowerShell Direct and does not save the password.";
+  els.provisionWorkspaceBtn.textContent = status.provisioned
+    ? "Reinstall / Update Cotrux"
+    : "Install & Configure Cotrux";
+
+  const pin = String(status.pairingPin || "");
+  els.workspacePairing.classList.toggle("hidden", !status.provisioned || !/^\d{6}$/.test(pin));
+  if (/^\d{6}$/.test(pin)) {
+    els.workspacePairingPin.textContent = pin.slice(0, 3) + " " + pin.slice(3);
+  }
 }
 
 async function refreshWorkspaceStatus() {
@@ -647,6 +676,42 @@ els.stopWorkspaceBtn.addEventListener("click", async () => {
   await renderWorkspaceStatus(status);
   els.stopWorkspaceBtn.disabled = false;
   setState(status.running ? "Workspace still running" : "Workspace saved · data preserved", status.running ? "error" : "ready");
+});
+
+els.provisionWorkspaceBtn.addEventListener("click", async () => {
+  const username = els.workspaceGuestUser.value.trim();
+  const password = els.workspaceGuestPass.value;
+
+  if (!username || !password) {
+    setState("Enter the workspace Windows username and password", "error");
+    els.workspaceGuestPass.focus();
+    return;
+  }
+
+  els.provisionWorkspaceBtn.disabled = true;
+  const previousText = els.provisionWorkspaceBtn.textContent;
+  els.provisionWorkspaceBtn.textContent = "Installing inside workspace…";
+  setState("Provisioning Cotrux in workspace", "pending");
+
+  try {
+    const status = await window.cotrux.workspaceProvision({ username, password });
+    els.workspaceGuestPass.value = "";
+    await renderWorkspaceStatus(status);
+
+    if (status.provisioned && !status.error) {
+      setState("Workspace Cotrux ready · pair once with the PIN", "ready");
+    } else {
+      setState(status.error || status.provisionResult?.error || "Guest provisioning failed", "error");
+    }
+  } catch (error) {
+    els.workspaceGuestPass.value = "";
+    setState(String(error?.message || error || "Guest provisioning failed"), "error");
+  } finally {
+    els.provisionWorkspaceBtn.disabled = false;
+    if (!els.provisionWorkspaceBtn.textContent || els.provisionWorkspaceBtn.textContent === "Installing inside workspace…") {
+      els.provisionWorkspaceBtn.textContent = previousText;
+    }
+  }
 });
 
 els.openWorkspaceBtn.addEventListener("click", async () => {
