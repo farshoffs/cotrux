@@ -1,56 +1,112 @@
 # Cotrux
 
-Cotrux is a consent-first remote desktop MVP: control a computer from a browser, installable PWA, or iPhone/iPad wrapper.
+Cotrux is a consent-first remote desktop MVP for controlling a computer from a browser, installable PWA, iPhone/iPad, or another computer.
 
-## Architecture
+## What is included
 
-- Desktop Agent (Electron) — shares the primary display and applies mouse/keyboard input only after the person at the host accepts a connection.
-- Controller (Web/PWA/iOS-ready) — receives the WebRTC stream and sends pointer/keyboard events over a WebRTC data channel.
-- Signal service (Node + ws) — pairs a controller to a host using an ephemeral 6-digit PIN, then relays only WebRTC negotiation messages.
-- TURN — optional but recommended for reliable connections across restrictive NAT/firewalls.
+- **Desktop Agent (Electron)** — captures the primary desktop and applies mouse/keyboard input.
+- **Web/PWA Controller** — desktop video, mouse/touch, keyboard, scrolling, fullscreen and clipboard-to-host.
+- **iOS-ready Controller** — the PWA installs directly from Safari, and the same UI has a Capacitor wrapper for a native App Store build.
+- **WebRTC transport** — desktop media and control data travel over an encrypted WebRTC peer connection.
+- **Cotrux Server** — one Node/WebSocket service serves the PWA and handles one-time PIN pairing/signaling.
+- **TURN support** — optional credentials can be configured for networks where direct WebRTC connectivity fails.
 
-The signaling server does not relay desktop video in normal operation. WebRTC media/control traffic is peer-to-peer when networking allows.
+Cotrux is intended only for computers you own or are authorized to control.
 
-## MVP security model
+## Connection flow
 
-1. The host agent displays a fresh six-digit PIN.
-2. A controller enters that PIN.
-3. The host receives a visible connection request and must accept it.
-4. The desktop agent remains visible while the session is active and includes a Stop session control.
-5. PINs live only in server memory; no unattended access is enabled in this MVP.
+1. Open the Cotrux desktop agent on the computer to be controlled.
+2. The agent generates a six-digit one-time PIN.
+3. Open the Cotrux web/PWA controller and enter that PIN.
+4. The host computer shows a visible access request.
+5. The host accepts it and the WebRTC desktop session starts.
+6. Either side can end the session. The host then receives a fresh PIN.
 
-Use Cotrux only on computers you own or are authorized to control.
+The server rate-limits PIN attempts. This MVP does **not** enable hidden or unattended access.
 
 ## Run locally
 
-Requirements: Node.js 22.12+.
+Requires Node.js 22.12 or newer.
 
     npm install
 
-    # Terminal 1 - signaling
+Start Cotrux Server:
+
     npm run dev:signal
 
-    # Terminal 2 - web controller
-    npm run dev:controller
+Then open:
 
-    # Terminal 3 - desktop host
+    http://localhost:8787
+
+Start the desktop agent in another terminal:
+
     npm run dev:agent
 
-The controller defaults to ws://localhost:8787/ws.
+The agent defaults to:
 
-## PWA
+    ws://localhost:8787/ws
 
-Build the controller:
+You can also run the PWA with Vite during UI development:
 
-    npm run build:controller
+    npm run dev:controller
 
-apps/controller/dist is a static PWA and can be deployed to GitHub Pages, Cloudflare Pages, Netlify, etc. The included GitHub Pages workflow publishes after pushes to main once GitHub Pages has been enabled for the repository with GitHub Actions as its source.
+## Deploy the web/PWA + signaling server
 
-For production, put the signaling service behind HTTPS/WSS and enter that WSS URL in Controller Settings.
+The server now serves the controller itself, so one public deployment is enough.
 
-## iOS
+### Render Blueprint
 
-The web controller already works as an installable iOS PWA. A Capacitor wrapper is scaffolded too:
+A ready-to-use `render.yaml` is included. Create a Render Blueprint from this repository. It will:
+
+- build `services/signal/Dockerfile` from the repository root,
+- deploy in Render's Singapore region,
+- health-check `/health`,
+- publish the PWA and WebSocket endpoint on the same hostname,
+- deploy new commits after CI checks pass.
+
+After deployment, if your service URL is:
+
+    https://your-cotrux-host.example
+
+then:
+
+    PWA:       https://your-cotrux-host.example
+    Signaling: wss://your-cotrux-host.example/ws
+    Health:    https://your-cotrux-host.example/health
+
+Paste that WSS address into the desktop agent once and reconnect.
+
+### Docker anywhere
+
+Build from the repository root:
+
+    docker build -f services/signal/Dockerfile -t cotrux .
+
+Run:
+
+    docker run --rm -p 8787:8787 -e PORT=8787 cotrux
+
+For a reverse proxy, terminate TLS there and proxy WebSocket upgrades to the same service.
+
+## TURN for reliable internet connections
+
+WebRTC can connect directly on many networks. Corporate networks, carrier NAT, and strict firewalls may require TURN.
+
+An example coturn configuration lives at:
+
+    infra/coturn/turnserver.conf.example
+
+Enter the deployed TURN URL, username and credential in both the host and controller network settings.
+
+## iPhone / iPad
+
+### PWA
+
+Open the public Cotrux URL in Safari and use **Add to Home Screen**. The controller is standalone-capable and works with touch controls and the on-screen keyboard.
+
+### Native iOS wrapper
+
+The controller includes Capacitor scaffolding:
 
     npm install
     npm run build:controller
@@ -59,25 +115,55 @@ The web controller already works as an installable iOS PWA. A Capacitor wrapper 
     npm run ios:sync
     npm run ios:open
 
-Xcode will create/sign the native iOS project for your Apple team. The controller does not attempt to host/control iOS itself; iOS is the controlling device.
+Xcode is still required for Apple signing and App Store/TestFlight distribution.
 
-## Internet deployment
+## Desktop installers
 
-Build and deploy services/signal anywhere that supports long-lived WebSockets.
+GitHub Actions builds the Electron desktop agent for:
 
-    docker build -t cotrux-signal services/signal
-    docker run -p 8787:8787 -e PORT=8787 cotrux-signal
+- Windows — NSIS installer
+- macOS — Electron app package
+- Linux — AppImage
 
-For difficult NATs, deploy a TURN server and configure iceServers in the controller/agent settings. infra/coturn/turnserver.conf.example is included as a starting point.
+The `Build Cotrux Desktop Agent` workflow uploads each platform build as a GitHub Actions artifact. Tagged releases beginning with `v` also trigger the build.
 
-## Desktop permissions
+For a production macOS/Windows release, add proper code-signing/notarization credentials instead of distributing unsigned builds.
 
-- Windows: normal desktop input generally works after dependencies install.
-- macOS: allow Screen Recording and Accessibility for Cotrux.
-- Linux: X11 works best for the MVP. Wayland often blocks synthetic input by design unless compositor/portal-specific integration is added.
+## GitHub Pages
 
-## Current scope
+An optional Pages workflow remains in `.github/workflows/pages.yml`, but it is manual because GitHub requires Pages to be enabled at repository level first. The unified Cotrux Server deployment is the recommended setup because it hosts the PWA and WebSocket endpoint together.
 
-The first version includes screen streaming, mouse/touch control, keyboard input, clipboard-to-host text, reconnectable signaling settings, pairing approval, PWA installability, and iOS Capacitor scaffolding.
+## Security model
 
-Next production steps would be authenticated accounts/devices, trusted-device unattended mode, encrypted persistent device keys, multi-monitor selection, file transfer, session audit logs, TURN credentials, auto-updates, code signing/notarization, and relay fallback.
+- Explicit host approval for every session.
+- Visible active-session UI and host-side stop control.
+- Six-digit PIN rotates after sessions.
+- Server-side PIN-attempt rate limiting.
+- WebRTC DTLS/SRTP encryption for media and data channels.
+- No persistent unattended-access password in this MVP.
+- No hidden agent, stealth mode, key logging, or background surveillance behavior.
+- WebSocket signaling payload is limited in size.
+- Clipboard writes are bounded before being passed to the host.
+
+For production use, add authenticated accounts, device public keys, short-lived signed pairing tokens, TURN time-limited credentials, audit logs, code signing, automatic updates and a security review.
+
+## Verification
+
+The `Validate Cotrux` GitHub Actions workflow performs:
+
+- dependency installation,
+- JavaScript syntax validation,
+- an end-to-end signaling/pairing relay test,
+- PWA build validation.
+
+## Project layout
+
+    apps/
+      agent/         Electron host
+      controller/    Web/PWA/iOS controller
+    services/
+      signal/        Web + WebSocket server
+    infra/
+      coturn/        TURN example
+    .github/
+      workflows/     CI, installer builds, optional Pages deploy
