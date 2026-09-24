@@ -76,14 +76,26 @@ h1 { font-size: 27px; margin: 8px 0 8px; letter-spacing: -.04em; }
   margin-top: 19px; padding-top: 18px; border-top: 1px solid var(--line);
   display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: end;
 }
-.workspace-pin-block strong {
-  display: block; margin-top: 7px; font-size: 31px; letter-spacing: .14em;
-  background: linear-gradient(100deg, #fff, #bfffe1); -webkit-background-clip: text; color: transparent;
+.workspace-details strong { display: block; font-size: 14px; }
+.workspace-details span { display: block; color: #c7ccd7; font-size: 11px; margin-top: 5px; word-break: break-all; }
+.workspace-details small { display: block; max-width: 470px; color: var(--muted); line-height: 1.45; margin-top: 6px; }
+.workspace-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.workspace-guide {
+  grid-column: 1/-1; margin-top: 4px; padding: 13px; border: 1px solid var(--line);
+  border-radius: 14px; background: rgba(255,255,255,.03);
 }
-.workspace-pin-block small { display: block; max-width: 420px; color: var(--muted); line-height: 1.4; margin-top: 5px; }
-.workspace-actions { display: flex; gap: 8px; }
-.workspace-setup { margin-top: 18px; }
-.workspace-setup p { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 10px 0 0; }
+.workspace-guide strong { display: block; font-size: 12px; }
+.workspace-guide span { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 4px; }
+.workspace-setup { margin-top: 18px; display: grid; gap: 10px; }
+.workspace-setup p { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 0; }
+.workspace-iso-tools { display: grid; gap: 9px; }
+.iso-row {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  border: 1px solid var(--line); background: rgba(255,255,255,.03); padding: 12px; border-radius: 14px;
+}
+.iso-row strong { display: block; font-size: 12px; }
+.iso-row span { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; max-width: 390px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-license { color: #747c8e; font-size: 10px; line-height: 1.45; }
 .danger-inline {
   background: rgba(255,82,99,.12); color: #ff7e8b; border: 1px solid rgba(255,82,99,.2);
 }
