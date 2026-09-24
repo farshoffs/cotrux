@@ -18,6 +18,7 @@ const els = {
   chooseWorkspaceIsoBtn: $("#chooseWorkspaceIsoBtn"),
   downloadWindowsBtn: $("#downloadWindowsBtn"),
   openWorkspaceBtn: $("#openWorkspaceBtn"),
+  repairWorkspaceBootBtn: $("#repairWorkspaceBootBtn"),
   stopWorkspaceBtn: $("#stopWorkspaceBtn"),
   windowsFeaturesBtn: $("#windowsFeaturesBtn"),
   workspaceProvision: $("#workspaceProvision"),
@@ -667,6 +668,33 @@ els.resumeWorkspaceBtn.addEventListener("click", async () => {
 els.chooseWorkspaceIsoBtn.addEventListener("click", async () => {
   const status = await window.cotrux.workspaceChooseIso();
   await renderWorkspaceStatus(status);
+  if (status.error) setState(status.error, "error");
+  else if (status.isoPath) setState("Windows ISO validated", "ready");
+});
+
+els.repairWorkspaceBootBtn.addEventListener("click", async () => {
+  els.repairWorkspaceBootBtn.disabled = true;
+  const oldText = els.repairWorkspaceBootBtn.textContent;
+  els.repairWorkspaceBootBtn.textContent = "Validating & repairing…";
+  setState("Checking Windows ISO and repairing VM boot", "pending");
+
+  try {
+    const status = await window.cotrux.workspaceRepairBoot();
+    await renderWorkspaceStatus(status);
+
+    if (status.repairResult?.ok && !status.error) {
+      setState("Boot repaired · Windows installer should start now", "ready");
+    } else if (status.error) {
+      setState(status.error, "error");
+    } else {
+      setState("Boot repair cancelled", "ready");
+    }
+  } catch (error) {
+    setState(String(error?.message || error || "Boot repair failed"), "error");
+  } finally {
+    els.repairWorkspaceBootBtn.disabled = false;
+    els.repairWorkspaceBootBtn.textContent = oldText;
+  }
 });
 
 els.downloadWindowsBtn.addEventListener("click", async () => {
