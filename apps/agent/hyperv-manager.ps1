@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("status","enable","create","start","save","provision")]
+  [ValidateSet("status","enable","create","start","save","provision","prepare-bootstrap")]
   [string]$Action = "status",
   [string]$VmName = "Cotrux Persistent Workspace",
   [string]$VhdPath = "",
@@ -191,6 +191,97 @@ try {
     if ($vm.State -eq "Running") { Save-VM -Name $VmName }
     $vm = Get-VM -Name $VmName
     Write-Result @{ ok = $true; exists = $true; running = $false; state = [string]$vm.State; message = "Workspace saved. VHDX data and VM state were preserved." }
+    exit
+  }
+
+  if ($Action -eq "prepare-bootstrap") {
+    if (-not (Is-Admin)) { Relaunch-Elevated }
+    if (-not $InstallerUrl -or -not $InstallerUrl.StartsWith("https://github.com/farshoffs/cotrux/")) {
+      throw "The Cotrux installer URL is invalid."
+    }
+    if ($PairingPin -notmatch "^\d{6}$") { throw "A valid six-digit workspace pairing PIN is required." }
+    if (-not $SignalUrl) { throw "Cotrux signaling URL is required." }
+
+    if ($vm.State -ne "Running") {
+      Start-VM -Name $VmName | Out-Null
+      Start-Sleep -Seconds 3
+    }
+
+    Enable-VMIntegrationService -VMName $VmName -Name "Guest Service Interface" -ErrorAction SilentlyContinue
+
+    $tempInstaller = Join-Path $env:TEMP ("Cotrux-Setup-" + [guid]::NewGuid().ToString("N") + ".exe")
+    $tempScript = Join-Path $env:TEMP ("Cotrux-Guest-Bootstrap-" + [guid]::NewGuid().ToString("N") + ".ps1")
+    $tempShortcut = Join-Path $env:TEMP ("Finish Cotrux Setup-" + [guid]::NewGuid().ToString("N") + ".lnk")
+
+    try {
+      Invoke-WebRequest -Uri $InstallerUrl -OutFile $tempInstaller -UseBasicParsing
+      if (-not (Test-Path $tempInstaller) -or (Get-Item $tempInstaller).Length -lt 10MB) {
+        throw "Downloaded Cotrux installer is incomplete."
+      }
+
+      $encodedSignal = [uri]::EscapeDataString($SignalUrl)
+      $encodedName = [uri]::EscapeDataString("Cotrux Persistent Workspace")
+      $bootstrap = @'
+$ErrorActionPreference = "Stop"
+Add-Type -AssemblyName PresentationFramework
+try {
+  $installer = "C:\Users\Public\Desktop\Cotrux-Setup.exe"
+  Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+
+  $candidates = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Cotrux\Cotrux.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\cotrux\Cotrux.exe"),
+    (Join-Path $env:ProgramFiles "Cotrux\Cotrux.exe")
+  )
+  $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $exe) {
+    $exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs") -Filter "Cotrux.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+  }
+  if (-not $exe) { throw "Cotrux installed, but Cotrux.exe could not be located." }
+
+  $arguments = @(
+    "--background-workspace",
+    "--workspace-bootstrap",
+    "--hidden",
+    "--signal-url=__SIGNAL__",
+    "--pairing-pin=__PIN__",
+    "--display-name=__NAME__"
+  )
+  Start-Process -FilePath $exe -ArgumentList $arguments
+  Start-Sleep -Seconds 3
+
+  Remove-Item $installer -Force -ErrorAction SilentlyContinue
+  Remove-Item "C:\Users\Public\Desktop\Finish Cotrux Setup.lnk" -Force -ErrorAction SilentlyContinue
+  [System.Windows.MessageBox]::Show("Cotrux is installed and configured. Return to the host Cotrux window and use the workspace pairing PIN.", "Cotrux Workspace", "OK", "Information") | Out-Null
+} catch {
+  [System.Windows.MessageBox]::Show($_.Exception.Message, "Cotrux Workspace Setup", "OK", "Error") | Out-Null
+}
+'@
+      $bootstrap = $bootstrap.Replace("__SIGNAL__", $encodedSignal).Replace("__PIN__", $PairingPin).Replace("__NAME__", $encodedName)
+      [System.IO.File]::WriteAllText($tempScript, $bootstrap, [System.Text.UTF8Encoding]::new($false))
+
+      $shell = New-Object -ComObject WScript.Shell
+      $shortcut = $shell.CreateShortcut($tempShortcut)
+      $shortcut.TargetPath = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+      $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Users\Public\Desktop\Cotrux-Guest-Bootstrap.ps1"'
+      $shortcut.WorkingDirectory = "C:\Users\Public\Desktop"
+      $shortcut.Description = "Finish Cotrux setup inside this persistent workspace"
+      $shortcut.Save()
+
+      Copy-VMFile -VMName $VmName -SourcePath $tempInstaller -DestinationPath "C:\Users\Public\Desktop\Cotrux-Setup.exe" -FileSource Host -CreateFullPath -Force
+      Copy-VMFile -VMName $VmName -SourcePath $tempScript -DestinationPath "C:\Users\Public\Desktop\Cotrux-Guest-Bootstrap.ps1" -FileSource Host -CreateFullPath -Force
+      Copy-VMFile -VMName $VmName -SourcePath $tempShortcut -DestinationPath "C:\Users\Public\Desktop\Finish Cotrux Setup.lnk" -FileSource Host -CreateFullPath -Force
+
+      Write-Result @{
+        ok = $true
+        prepared = $true
+        message = "One-click guest setup was copied to the VM desktop. Open the workspace and double-click Finish Cotrux Setup."
+      }
+    } finally {
+      Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
+      Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+      Remove-Item $tempShortcut -Force -ErrorAction SilentlyContinue
+    }
     exit
   }
 
