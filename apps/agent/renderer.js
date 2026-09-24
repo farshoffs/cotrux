@@ -4,6 +4,17 @@ const els = {
   statePill: $("#statePill"),
   stateText: $("#stateText"),
   computerName: $("#computerName"),
+  workspaceCard: $("#workspaceCard"),
+  workspaceBadge: $("#workspaceBadge"),
+  workspaceReady: $("#workspaceReady"),
+  workspaceSetup: $("#workspaceSetup"),
+  workspacePin: $("#workspacePin"),
+  workspaceRequirement: $("#workspaceRequirement"),
+  startWorkspaceBtn: $("#startWorkspaceBtn"),
+  openWorkspaceBtn: $("#openWorkspaceBtn"),
+  stopWorkspaceBtn: $("#stopWorkspaceBtn"),
+  windowsFeaturesBtn: $("#windowsFeaturesBtn"),
+  accessCard: $("#accessCard"),
   pin: $("#pin"),
   newPinBtn: $("#newPinBtn"),
   copyPinBtn: $("#copyPinBtn"),
@@ -36,6 +47,7 @@ let pc;
 let controlChannel;
 let captureStream;
 let reconnectTimer;
+let workspacePollTimer;
 let currentPin = "";
 let pendingRequestId = "";
 let pendingControllerId = "";
@@ -111,6 +123,20 @@ function renderPin() {
   els.pin.textContent = currentPin.slice(0, 3) + " " + currentPin.slice(3);
 }
 
+async function rotatePin() {
+  currentPin = generatePin();
+  renderPin();
+
+  if (config.backgroundWorkspace) {
+    config = {
+      ...config,
+      ...(await window.cotrux.saveConfig({ pairingPin: currentPin }))
+    };
+  }
+
+  registerHost();
+}
+
 function renderTrustedDevices() {
   const devices = config.trustedDevices || [];
   els.trustedSummary.textContent = devices.length ? devices.length + (devices.length === 1 ? " trusted device" : " trusted devices") : "None yet";
@@ -150,11 +176,43 @@ function renderTrustedDevices() {
   }
 }
 
-function newPin() {
-  if (sessionActive) return;
-  currentPin = generatePin();
-  renderPin();
-  registerHost();
+async function renderWorkspaceStatus(status) {
+  if (!status || config.workspaceMode) {
+    els.workspaceCard.classList.add("hidden");
+    return;
+  }
+
+  els.workspaceCard.classList.remove("hidden");
+  els.workspaceBadge.dataset.state = status.running ? "on" : status.supported ? "off" : "unsupported";
+  els.workspaceBadge.textContent = status.running ? "RUNNING" : status.supported ? "OFF" : "SETUP";
+
+  if (status.running) {
+    els.workspaceReady.classList.remove("hidden");
+    els.workspaceSetup.classList.add("hidden");
+    const pin = String(status.pairingPin || "------");
+    els.workspacePin.textContent = pin.length === 6 ? pin.slice(0, 3) + " " + pin.slice(3) : pin;
+    return;
+  }
+
+  els.workspaceReady.classList.add("hidden");
+  els.workspaceSetup.classList.remove("hidden");
+  els.startWorkspaceBtn.disabled = !status.supported;
+  els.workspaceRequirement.textContent = status.error || status.reason || (
+    status.supported
+      ? "Starts an isolated Windows desktop in the background. The physical user can keep working normally."
+      : "Background Workspace is unavailable on this computer."
+  );
+  els.windowsFeaturesBtn.classList.toggle("hidden", status.supported || navigator.platform.indexOf("Win") === -1);
+}
+
+async function refreshWorkspaceStatus() {
+  if (config?.workspaceMode) return;
+  try {
+    const status = await window.cotrux.workspaceStatus();
+    await renderWorkspaceStatus(status);
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 async function saveNetworkSettings(reconnect = false) {
@@ -230,6 +288,11 @@ function connectSignal() {
       els.trustRequestRow.classList.toggle("hidden", !config.unattendedEnabled || !pendingControllerId);
       els.requestCard.classList.remove("hidden");
       setState("Approval needed", "pending");
+
+      if (config.backgroundWorkspace && config.unattendedEnabled && pendingControllerId) {
+        els.trustRequest.checked = true;
+        els.acceptBtn.click();
+      }
       return;
     }
 
@@ -241,8 +304,10 @@ function connectSignal() {
         els.sessionTitle.textContent = "Trusted controller connected";
         els.sessionText.textContent = (msg.controllerName || "A trusted controller") + " connected using unattended access.";
       } else {
-        els.sessionTitle.textContent = "Remote control is on";
-        els.sessionText.textContent = "Your primary display is being shared. Mouse, keyboard and clipboard commands can be received.";
+        els.sessionTitle.textContent = config.backgroundWorkspace ? "Background workspace connected" : "Remote control is on";
+        els.sessionText.textContent = config.backgroundWorkspace
+          ? "This isolated workspace is being controlled without affecting the physical desktop."
+          : "Your primary display is being shared. Mouse, keyboard and clipboard commands can be received.";
       }
 
       try {
@@ -272,9 +337,7 @@ function connectSignal() {
 
     if (msg.type === "error") {
       if (msg.code === "PIN_IN_USE") {
-        currentPin = generatePin();
-        renderPin();
-        registerHost();
+        await rotatePin();
       } else {
         setState(msg.code || "Signal error", "error");
       }
@@ -410,7 +473,7 @@ function teardownPeer() {
   pendingCandidates = [];
 }
 
-function stopSession(notify = true) {
+async function stopSession(notify = true) {
   if (notify) sendWs({ type: "session-end" });
   teardownPeer();
   pendingTrustGrant = null;
@@ -425,9 +488,7 @@ function stopSession(notify = true) {
     ws?.readyState === WebSocket.OPEN ? "ready" : "pending"
   );
 
-  currentPin = generatePin();
-  renderPin();
-  registerHost();
+  await rotatePin();
 }
 
 els.acceptBtn.addEventListener("click", async () => {
@@ -490,7 +551,7 @@ els.rejectBtn.addEventListener("click", () => {
 });
 
 els.stopBtn.addEventListener("click", () => stopSession(true));
-els.newPinBtn.addEventListener("click", newPin);
+els.newPinBtn.addEventListener("click", () => rotatePin());
 
 els.copyPinBtn.addEventListener("click", async () => {
   await window.cotrux.control({ kind: "clipboard", text: currentPin });
@@ -521,6 +582,33 @@ els.revokeAllBtn.addEventListener("click", async () => {
   setState("All trusted access revoked", "ready");
 });
 
+els.startWorkspaceBtn.addEventListener("click", async () => {
+  els.startWorkspaceBtn.disabled = true;
+  els.startWorkspaceBtn.textContent = "Starting…";
+  const status = await window.cotrux.workspaceStart();
+  await renderWorkspaceStatus(status);
+  els.startWorkspaceBtn.textContent = "Start Background Workspace";
+  els.startWorkspaceBtn.disabled = !status.supported;
+  setState(status.running ? "Background workspace running" : "Workspace could not start", status.running ? "ready" : "error");
+});
+
+els.stopWorkspaceBtn.addEventListener("click", async () => {
+  els.stopWorkspaceBtn.disabled = true;
+  const status = await window.cotrux.workspaceStop();
+  await renderWorkspaceStatus(status);
+  els.stopWorkspaceBtn.disabled = false;
+  setState(status.running ? "Workspace still running" : "Background workspace stopped", status.running ? "error" : "ready");
+});
+
+els.openWorkspaceBtn.addEventListener("click", async () => {
+  const status = await window.cotrux.workspaceConnect();
+  if (!status.opened) setState(status.error || "Could not open workspace", "error");
+});
+
+els.windowsFeaturesBtn.addEventListener("click", async () => {
+  await window.cotrux.openWindowsFeatures();
+});
+
 els.reconnectBtn.addEventListener("click", async () => {
   await saveNetworkSettings(false);
   connectSignal();
@@ -531,6 +619,7 @@ els.saveAdvancedBtn.addEventListener("click", () => saveNetworkSettings(false));
 window.addEventListener("beforeunload", () => {
   shuttingDown = true;
   clearTimeout(reconnectTimer);
+  clearInterval(workspacePollTimer);
   try { sendWs({ type: "session-end" }); } catch {}
   teardownPeer();
 });
@@ -548,8 +637,25 @@ async function init() {
   els.startupToggle.checked = Boolean(config.startup?.enabled);
   els.startupToggle.disabled = config.startup?.supported === false;
 
+  if (config.workspaceMode) {
+    els.workspaceCard.classList.add("hidden");
+    els.accessCard.classList.add("hidden");
+  } else {
+    await refreshWorkspaceStatus();
+    workspacePollTimer = setInterval(refreshWorkspaceStatus, 6000);
+  }
+
   renderTrustedDevices();
-  currentPin = generatePin();
+
+  if (config.backgroundWorkspace && /^\d{6}$/.test(String(config.pairingPin || ""))) {
+    currentPin = String(config.pairingPin);
+  } else {
+    currentPin = generatePin();
+    if (config.backgroundWorkspace) {
+      config = { ...config, ...(await window.cotrux.saveConfig({ pairingPin: currentPin })) };
+    }
+  }
+
   renderPin();
   connectSignal();
 }

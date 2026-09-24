@@ -20,7 +20,36 @@
       <div id="statePill" class="pill" data-state="idle"><span></span><b id="stateText">Starting</b></div>
     </header>
 
-    <section class="access-card">
+    <section id="workspaceCard" class="workspace-card">
+      <div class="section-head split">
+        <div>
+          <span class="eyebrow">BACKGROUND WORKSPACE</span>
+          <h1>Work on a separate desktop.</h1>
+          <p>The person at this PC keeps using their normal desktop while Cotrux gives you a separate isolated Windows session to control remotely.</p>
+        </div>
+        <span id="workspaceBadge" class="workspace-badge" data-state="off">OFF</span>
+      </div>
+
+      <div id="workspaceReady" class="workspace-ready hidden">
+        <div class="workspace-pin-block">
+          <span class="eyebrow">WORKSPACE PAIRING PIN</span>
+          <strong id="workspacePin">------</strong>
+          <small>Needed only the first time. Trust the workspace from your controller for future PIN-free access.</small>
+        </div>
+        <div class="workspace-actions">
+          <button id="openWorkspaceBtn" class="ghost" type="button">Open locally</button>
+          <button id="stopWorkspaceBtn" class="danger-inline" type="button">Stop workspace</button>
+        </div>
+      </div>
+
+      <div id="workspaceSetup" class="workspace-setup">
+        <button id="startWorkspaceBtn" class="primary full" type="button">Start Background Workspace</button>
+        <p id="workspaceRequirement">Checking Windows Sandbox support…</p>
+        <button id="windowsFeaturesBtn" class="ghost full hidden" type="button">Open Windows Features</button>
+      </div>
+    </section>
+
+    <section id="accessCard" class="access-card">
       <div class="section-head split">
         <div>
           <span class="eyebrow">UNATTENDED ACCESS</span>
@@ -96,7 +125,7 @@
       <div class="preview-wrap">
         <video id="preview" autoplay muted playsinline></video>
       </div>
-      <button id="stopBtn" class="danger" type="button">Stop remote session</button>
+      <button id="stopBtn" class="danger">Stop remote session</button>
     </section>
 
     <section class="settings">
@@ -120,7 +149,7 @@
     </section>
 
     <footer>
-      Unattended access is off until you enable it. Cotrux remains visible in the system tray while running.
+      Background Workspace is isolated from the physical desktop. Unattended access remains explicitly controllable and revocable.
     </footer>
   </main>
 

@@ -1,13 +1,26 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, Menu, nativeImage, screen, session, Tray } from "electron";
 import { mouse, keyboard, Button, Key, Point } from "@nut-tree-fork/nut-js";
 import crypto from "node:crypto";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const execFileAsync = promisify(execFile);
 const DEFAULT_SIGNAL_URL = "wss://cotrux-production.up.railway.app/ws";
+const isBackgroundWorkspace = process.argv.includes("--background-workspace");
+const dataDirArg = process.argv.find(arg => arg.startsWith("--data-dir="));
+
+if (dataDirArg) {
+  const customDataDir = decodeURIComponent(dataDirArg.slice("--data-dir=".length));
+  if (customDataDir) {
+    fs.mkdirSync(customDataDir, { recursive: true });
+    app.setPath("userData", customDataDir);
+  }
+}
 
 mouse.config.mouseSpeed = 2200;
 keyboard.config.autoDelayMs = 0;
@@ -20,12 +33,21 @@ function configPath() {
   return path.join(app.getPath("userData"), "cotrux-config.json");
 }
 
-function readConfig() {
-  let stored = {};
+function readJsonFile(filename, fallback = {}) {
   try {
-    stored = JSON.parse(fs.readFileSync(configPath(), "utf8"));
-  } catch {}
+    return JSON.parse(fs.readFileSync(filename, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
 
+function writeJsonFile(filename, value) {
+  fs.mkdirSync(path.dirname(filename), { recursive: true });
+  fs.writeFileSync(filename, JSON.stringify(value, null, 2), { mode: 0o600 });
+}
+
+function readConfig() {
+  const stored = readJsonFile(configPath(), {});
   const next = {
     deviceId: typeof stored.deviceId === "string" && stored.deviceId ? stored.deviceId : crypto.randomUUID(),
     signalUrl: typeof stored.signalUrl === "string" && stored.signalUrl ? stored.signalUrl : DEFAULT_SIGNAL_URL,
@@ -33,13 +55,13 @@ function readConfig() {
     turnUser: typeof stored.turnUser === "string" ? stored.turnUser : "",
     turnPass: typeof stored.turnPass === "string" ? stored.turnPass : "",
     unattendedEnabled: Boolean(stored.unattendedEnabled),
-    trustedDevices: Array.isArray(stored.trustedDevices) ? stored.trustedDevices.slice(0, 50) : []
+    trustedDevices: Array.isArray(stored.trustedDevices) ? stored.trustedDevices.slice(0, 50) : [],
+    backgroundWorkspace: Boolean(stored.backgroundWorkspace || isBackgroundWorkspace),
+    pairingPin: /^\d{6}$/.test(String(stored.pairingPin || "")) ? String(stored.pairingPin) : "",
+    displayName: typeof stored.displayName === "string" ? stored.displayName.slice(0, 80) : ""
   };
 
-  if (JSON.stringify(next) !== JSON.stringify(stored)) {
-    fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-    fs.writeFileSync(configPath(), JSON.stringify(next, null, 2), { mode: 0o600 });
-  }
+  if (JSON.stringify(next) !== JSON.stringify(stored)) writeJsonFile(configPath(), next);
   return next;
 }
 
@@ -47,10 +69,16 @@ function saveConfigPatch(patch = {}) {
   const current = readConfig();
   const next = { ...current };
 
-  for (const key of ["signalUrl", "turnUrl", "turnUser", "turnPass"]) {
+  for (const key of ["signalUrl", "turnUrl", "turnUser", "turnPass", "displayName"]) {
     if (typeof patch[key] === "string") next[key] = patch[key].slice(0, key === "turnPass" ? 512 : 1024);
   }
+
   if (typeof patch.unattendedEnabled === "boolean") next.unattendedEnabled = patch.unattendedEnabled;
+  if (typeof patch.backgroundWorkspace === "boolean") next.backgroundWorkspace = patch.backgroundWorkspace;
+
+  if (typeof patch.pairingPin === "string" && /^\d{6}$/.test(patch.pairingPin)) {
+    next.pairingPin = patch.pairingPin;
+  }
 
   if (Array.isArray(patch.trustedDevices)) {
     next.trustedDevices = patch.trustedDevices.slice(0, 50).map(item => ({
@@ -61,13 +89,12 @@ function saveConfigPatch(patch = {}) {
     })).filter(item => item.controllerId && /^[a-f0-9]{64}$/.test(item.tokenHash));
   }
 
-  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  writeJsonFile(configPath(), next);
   return next;
 }
 
 function startAtLoginSupported() {
-  return process.platform === "win32" || process.platform === "darwin";
+  return !isBackgroundWorkspace && (process.platform === "win32" || process.platform === "darwin");
 }
 
 function getStartupState() {
@@ -88,16 +115,319 @@ function setStartupState(enabled) {
   return getStartupState();
 }
 
+function generatePairingPin() {
+  const bytes = crypto.randomBytes(4);
+  return String(bytes.readUInt32BE(0) % 1000000).padStart(6, "0");
+}
+
+function workspaceRoot() {
+  return path.join(app.getPath("userData"), "BackgroundWorkspace");
+}
+
+function workspaceDataDir() {
+  return path.join(workspaceRoot(), "Data");
+}
+
+function workspaceConfigPath() {
+  return path.join(workspaceDataDir(), "cotrux-config.json");
+}
+
+function workspaceStatePath() {
+  return path.join(workspaceRoot(), "workspace-state.json");
+}
+
+function ensureWorkspaceState() {
+  const existing = readJsonFile(workspaceStatePath(), {});
+  const state = {
+    sandboxId: typeof existing.sandboxId === "string" ? existing.sandboxId : "",
+    deviceId: typeof existing.deviceId === "string" && existing.deviceId ? existing.deviceId : crypto.randomUUID(),
+    pairingPin: /^\d{6}$/.test(String(existing.pairingPin || "")) ? String(existing.pairingPin) : generatePairingPin(),
+    createdAt: Number(existing.createdAt || Date.now())
+  };
+  writeJsonFile(workspaceStatePath(), state);
+  return state;
+}
+
+function xmlEscape(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+async function hasWindowsSandboxCli() {
+  if (process.platform !== "win32" || isBackgroundWorkspace) return false;
+  try {
+    await execFileAsync("wsb.exe", ["--help"], {
+      windowsHide: true,
+      timeout: 7000,
+      encoding: "utf8"
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function syncWorkspaceConfig() {
+  const hostConfig = readConfig();
+  const state = ensureWorkspaceState();
+  const existing = readJsonFile(workspaceConfigPath(), {});
+
+  const workspaceConfig = {
+    ...existing,
+    deviceId: state.deviceId,
+    signalUrl: hostConfig.signalUrl || DEFAULT_SIGNAL_URL,
+    turnUrl: hostConfig.turnUrl || "",
+    turnUser: hostConfig.turnUser || "",
+    turnPass: hostConfig.turnPass || "",
+    unattendedEnabled: true,
+    trustedDevices: Array.isArray(existing.trustedDevices) ? existing.trustedDevices : [],
+    backgroundWorkspace: true,
+    pairingPin: /^\d{6}$/.test(String(existing.pairingPin || ""))
+      ? String(existing.pairingPin)
+      : state.pairingPin,
+    displayName: "Background Workspace"
+  };
+
+  state.pairingPin = workspaceConfig.pairingPin;
+  writeJsonFile(workspaceStatePath(), state);
+  writeJsonFile(workspaceConfigPath(), workspaceConfig);
+  return { state, workspaceConfig };
+}
+
+async function getBackgroundWorkspaceStatus() {
+  if (isBackgroundWorkspace) {
+    return {
+      supported: false,
+      running: false,
+      workspaceMode: true,
+      reason: "Background Workspace is already running inside the isolated session."
+    };
+  }
+
+  if (process.platform !== "win32") {
+    return {
+      supported: false,
+      running: false,
+      reason: "Background Workspace is currently available on Windows only."
+    };
+  }
+
+  if (!app.isPackaged) {
+    return {
+      supported: false,
+      running: false,
+      reason: "Install a packaged Cotrux desktop build to use Background Workspace."
+    };
+  }
+
+  const cliAvailable = await hasWindowsSandboxCli();
+  if (!cliAvailable) {
+    return {
+      supported: false,
+      running: false,
+      reason: "Requires Windows 11 24H2 or newer with Windows Sandbox enabled."
+    };
+  }
+
+  const { state, workspaceConfig } = syncWorkspaceConfig();
+  let running = false;
+
+  if (state.sandboxId) {
+    try {
+      const { stdout = "" } = await execFileAsync("wsb.exe", ["list", "--raw"], {
+        windowsHide: true,
+        timeout: 10000,
+        encoding: "utf8"
+      });
+      running = String(stdout).toLowerCase().includes(state.sandboxId.toLowerCase());
+    } catch {
+      running = false;
+    }
+  }
+
+  if (!running && state.sandboxId) {
+    state.sandboxId = "";
+    writeJsonFile(workspaceStatePath(), state);
+  }
+
+  return {
+    supported: true,
+    running,
+    sandboxId: running ? state.sandboxId : "",
+    deviceId: state.deviceId,
+    pairingPin: workspaceConfig.pairingPin,
+    name: workspaceConfig.displayName || "Background Workspace"
+  };
+}
+
+function extractSandboxId(stdout) {
+  const raw = String(stdout || "").trim();
+  if (!raw) return "";
+
+  try {
+    const parsed = JSON.parse(raw);
+    const stack = [parsed];
+    while (stack.length) {
+      const item = stack.pop();
+      if (typeof item === "string") {
+        const match = item.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+        if (match) return match[0];
+      } else if (item && typeof item === "object") {
+        stack.push(...Object.values(item));
+      }
+    }
+  } catch {}
+
+  return raw.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || "";
+}
+
+async function startBackgroundWorkspace() {
+  const status = await getBackgroundWorkspaceStatus();
+  if (!status.supported) return status;
+  if (status.running) return status;
+
+  const { state, workspaceConfig } = syncWorkspaceConfig();
+  const appDir = path.dirname(process.execPath);
+  const root = workspaceRoot();
+  fs.mkdirSync(workspaceDataDir(), { recursive: true });
+
+  const configXml = [
+    "<Configuration>",
+    "  <Networking>Enable</Networking>",
+    "  <ClipboardRedirection>Disable</ClipboardRedirection>",
+    "  <PrinterRedirection>Disable</PrinterRedirection>",
+    "  <AudioInput>Disable</AudioInput>",
+    "  <VideoInput>Disable</VideoInput>",
+    "  <MappedFolders>",
+    "    <MappedFolder>",
+    "      <HostFolder>" + xmlEscape(appDir) + "</HostFolder>",
+    "      <SandboxFolder>C:\\CotruxApp</SandboxFolder>",
+    "      <ReadOnly>true</ReadOnly>",
+    "    </MappedFolder>",
+    "    <MappedFolder>",
+    "      <HostFolder>" + xmlEscape(root) + "</HostFolder>",
+    "      <SandboxFolder>C:\\CotruxWorkspace</SandboxFolder>",
+    "      <ReadOnly>false</ReadOnly>",
+    "    </MappedFolder>",
+    "  </MappedFolders>",
+    "  <LogonCommand>",
+    "    <Command>C:\\CotruxApp\\Cotrux.exe --background-workspace --data-dir=C:\\CotruxWorkspace\\Data --hidden</Command>",
+    "  </LogonCommand>",
+    "  <MemoryInMB>4096</MemoryInMB>",
+    "</Configuration>"
+  ].join("");
+
+  try {
+    const { stdout = "" } = await execFileAsync("wsb.exe", [
+      "start",
+      "--config",
+      configXml,
+      "--raw"
+    ], {
+      windowsHide: true,
+      timeout: 45000,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024
+    });
+
+    const sandboxId = extractSandboxId(stdout);
+    if (!sandboxId) {
+      return {
+        ...status,
+        running: false,
+        error: "Windows Sandbox started but Cotrux could not read its session ID."
+      };
+    }
+
+    state.sandboxId = sandboxId;
+    state.pairingPin = workspaceConfig.pairingPin;
+    writeJsonFile(workspaceStatePath(), state);
+
+    return {
+      supported: true,
+      running: true,
+      sandboxId,
+      deviceId: state.deviceId,
+      pairingPin: workspaceConfig.pairingPin,
+      name: workspaceConfig.displayName || "Background Workspace"
+    };
+  } catch (error) {
+    return {
+      ...status,
+      running: false,
+      error: String(error?.stderr || error?.message || error).slice(0, 800)
+    };
+  }
+}
+
+async function stopBackgroundWorkspace() {
+  const state = ensureWorkspaceState();
+  if (!state.sandboxId) return getBackgroundWorkspaceStatus();
+
+  try {
+    await execFileAsync("wsb.exe", ["stop", "--id", state.sandboxId, "--raw"], {
+      windowsHide: true,
+      timeout: 30000,
+      encoding: "utf8"
+    });
+  } catch (error) {
+    const current = await getBackgroundWorkspaceStatus();
+    if (current.running) {
+      return { ...current, error: String(error?.stderr || error?.message || error).slice(0, 800) };
+    }
+  }
+
+  state.sandboxId = "";
+  writeJsonFile(workspaceStatePath(), state);
+  return getBackgroundWorkspaceStatus();
+}
+
+async function connectBackgroundWorkspace() {
+  const status = await getBackgroundWorkspaceStatus();
+  if (!status.running || !status.sandboxId) return { ...status, opened: false };
+
+  try {
+    const child = spawn("wsb.exe", ["connect", "--id", status.sandboxId], {
+      windowsHide: true,
+      detached: true,
+      stdio: "ignore"
+    });
+    child.unref();
+    return { ...status, opened: true };
+  } catch (error) {
+    return { ...status, opened: false, error: String(error?.message || error).slice(0, 800) };
+  }
+}
+
+function openWindowsFeatures() {
+  if (process.platform !== "win32") return { ok: false };
+  try {
+    const child = spawn("OptionalFeatures.exe", [], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false
+    });
+    child.unref();
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function createWindow() {
-  const hiddenStartup = process.argv.includes("--hidden");
+  const hiddenStartup = process.argv.includes("--hidden") || isBackgroundWorkspace;
   mainWindow = new BrowserWindow({
-    width: 680,
-    height: 850,
+    width: 700,
+    height: 900,
     minWidth: 540,
     minHeight: 680,
     show: !hiddenStartup,
     backgroundColor: "#090b10",
-    title: "Cotrux",
+    title: isBackgroundWorkspace ? "Cotrux Background Workspace" : "Cotrux",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -110,7 +440,7 @@ function createWindow() {
   mainWindow.loadFile("index.html");
 
   mainWindow.on("close", event => {
-    if (quitting) return;
+    if (quitting || isBackgroundWorkspace) return;
     event.preventDefault();
     mainWindow.hide();
   });
@@ -123,6 +453,7 @@ function showWindow() {
 }
 
 function createTray() {
+  if (isBackgroundWorkspace) return;
   const png = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAhUlEQVR42mNgoBvgP4P///8ZGBj+M8AAQ4wMDAz/GRgY/jMwMDAwMjIy/GeAAQYGBob/DDAwMDD8Z2BgYGD4zwADDDEyMjL8Z4ABBhkZGRn+MzAwMDD8Z4ABhhgZGxn+MzAwMDD8ZwABDDEyMjL8Z4ABBhkZGRn+MzAwMDD8Z4ABBgYGhv8MAAAJtCEfOJLaewAAAABJRU5ErkJggg==";
   const icon = nativeImage.createFromDataURL("data:image/png;base64," + png);
   tray = new Tray(icon);
@@ -285,15 +616,24 @@ app.whenReady().then(() => {
     };
   });
 
-  ipcMain.handle("cotrux:get-config", () => ({
-    ...readConfig(),
-    computerName: os.hostname(),
-    startup: getStartupState()
-  }));
+  ipcMain.handle("cotrux:get-config", () => {
+    const config = readConfig();
+    return {
+      ...config,
+      computerName: config.displayName || (isBackgroundWorkspace ? "Background Workspace" : os.hostname()),
+      workspaceMode: isBackgroundWorkspace,
+      startup: getStartupState()
+    };
+  });
 
   ipcMain.handle("cotrux:save-config", (_event, patch) => saveConfigPatch(patch));
   ipcMain.handle("cotrux:set-startup", (_event, enabled) => setStartupState(enabled));
   ipcMain.handle("cotrux:show-window", showWindow);
+  ipcMain.handle("cotrux:workspace-status", getBackgroundWorkspaceStatus);
+  ipcMain.handle("cotrux:workspace-start", startBackgroundWorkspace);
+  ipcMain.handle("cotrux:workspace-stop", stopBackgroundWorkspace);
+  ipcMain.handle("cotrux:workspace-connect", connectBackgroundWorkspace);
+  ipcMain.handle("cotrux:windows-features", openWindowsFeatures);
 
   createWindow();
   createTray();
@@ -310,5 +650,5 @@ app.on("before-quit", () => {
 
 app.on("window-all-closed", () => {
   if (process.platform === "darwin") return;
-  if (quitting) app.quit();
+  if (quitting || isBackgroundWorkspace) app.quit();
 });

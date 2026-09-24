@@ -173,3 +173,22 @@ The `Validate Cotrux` GitHub Actions workflow performs:
       coturn/        TURN example
     .github/
       workflows/     CI, installer builds, optional Pages deploy
+
+
+## Background Workspace
+
+Cotrux can run a second, isolated Windows desktop while the person at the physical PC keeps using their normal desktop. In the desktop GUI choose **Start Background Workspace**. Cotrux launches a Windows Sandbox session in the background, starts a second Cotrux agent inside it, and gives the workspace its own pairing PIN and trusted-device identity.
+
+The remote controller sees the workspace as a separate computer. After the first trusted pairing, it can be opened again without a PIN while the workspace is running. Remote mouse and keyboard events stay inside the sandbox and do not move the physical user's pointer.
+
+Current requirements:
+
+- Windows 11 24H2 or newer.
+- Windows Sandbox enabled.
+- A supported Windows edition (Pro, Enterprise, Education, or equivalent Sandbox-capable edition).
+- Hardware virtualization available.
+- One Background Workspace at a time because Windows Sandbox currently supports one running instance.
+
+The desktop GUI checks support automatically and can open **Windows Features** for setup. No manual terminal or CMD commands are required.
+
+For isolation, Cotrux disables clipboard, printer, microphone, and camera redirection for the background workspace. It maps only the installed Cotrux application read-only plus a dedicated Cotrux workspace-data folder. The sandbox itself is disposable; Cotrux trust/config data persists only in that dedicated mapped folder.

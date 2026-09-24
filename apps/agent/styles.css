@@ -23,7 +23,7 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 
-.app { padding: 22px; max-width: 720px; margin: 0 auto; }
+.app { padding: 22px; max-width: 740px; margin: 0 auto; }
 header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .brand { display: flex; align-items: center; gap: 11px; }
 .brand-mark {
@@ -45,7 +45,7 @@ header { display: flex; align-items: center; justify-content: space-between; mar
 .pill[data-state="live"] span { background: var(--danger); box-shadow: 0 0 12px rgba(255,90,106,.55); }
 .pill[data-state="error"] span { background: var(--danger); }
 
-.access-card, .pin-card, .request-card, .session-card, .settings {
+.workspace-card, .access-card, .pin-card, .request-card, .session-card, .settings {
   border: 1px solid var(--line);
   border-radius: 22px;
   background: linear-gradient(150deg, rgba(25,28,38,.9), rgba(13,15,21,.9));
@@ -53,12 +53,40 @@ header { display: flex; align-items: center; justify-content: space-between; mar
   margin-bottom: 14px;
   box-shadow: 0 24px 70px rgba(0,0,0,.24);
 }
+.workspace-card {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(73,214,151,.10), transparent 18rem),
+    linear-gradient(150deg, rgba(25,28,38,.94), rgba(13,15,21,.94));
+}
 .eyebrow { display: block; color: var(--accent-2); font-size: 10px; font-weight: 800; letter-spacing: .14em; }
 h1 { font-size: 27px; margin: 8px 0 8px; letter-spacing: -.04em; }
 .section-head p, .pin-card p, .request-card p, .session-card p {
   color: var(--muted); line-height: 1.55; font-size: 13px; margin: 0;
 }
 .split { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start; }
+
+.workspace-badge {
+  border-radius: 999px; padding: 7px 9px; font-size: 9px; letter-spacing: .1em; font-weight: 900;
+  border: 1px solid var(--line); background: rgba(255,255,255,.04); color: #8d95a5;
+}
+.workspace-badge[data-state="on"] { color: #79eab7; border-color: rgba(73,214,151,.25); background: rgba(73,214,151,.09); }
+.workspace-badge[data-state="unsupported"] { color: #ffc66b; border-color: rgba(255,198,107,.22); background: rgba(255,198,107,.07); }
+
+.workspace-ready {
+  margin-top: 19px; padding-top: 18px; border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: end;
+}
+.workspace-pin-block strong {
+  display: block; margin-top: 7px; font-size: 31px; letter-spacing: .14em;
+  background: linear-gradient(100deg, #fff, #bfffe1); -webkit-background-clip: text; color: transparent;
+}
+.workspace-pin-block small { display: block; max-width: 420px; color: var(--muted); line-height: 1.4; margin-top: 5px; }
+.workspace-actions { display: flex; gap: 8px; }
+.workspace-setup { margin-top: 18px; }
+.workspace-setup p { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 10px 0 0; }
+.danger-inline {
+  background: rgba(255,82,99,.12); color: #ff7e8b; border: 1px solid rgba(255,82,99,.2);
+}
 
 .switch { position: relative; display: inline-flex; width: 52px; height: 30px; flex: 0 0 auto; }
 .switch.small { width: 45px; height: 26px; }
@@ -108,6 +136,7 @@ button {
 .ghost { background: rgba(255,255,255,.065); border: 1px solid var(--line); }
 .compact { padding: 8px 10px; font-size: 11px; }
 .primary { background: linear-gradient(145deg, #7d5cff, #4a5cff); }
+.full { width: 100%; }
 .danger {
   width: 100%; background: rgba(255,82,99,.13); color: #ff7e8b; border: 1px solid rgba(255,82,99,.2);
   margin-top: 14px;
@@ -147,13 +176,15 @@ input:focus { border-color: rgba(125,92,255,.55); }
 details summary { color: #c8ccd5; font-size: 12px; cursor: pointer; }
 .details-grid { margin-top: 14px; }
 .details-grid input { margin-bottom: 12px; }
-.full { width: 100%; }
 
 footer { color: #686f80; font-size: 10px; text-align: center; padding: 4px 0 12px; }
 .hidden { display: none !important; }
 
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .app { padding: 14px; }
-  .access-card, .pin-card, .request-card, .session-card, .settings { padding: 18px; }
+  .workspace-card, .access-card, .pin-card, .request-card, .session-card, .settings { padding: 18px; }
   .pin { font-size: 46px; }
+  .workspace-ready { grid-template-columns: 1fr; }
+  .workspace-actions { width: 100%; }
+  .workspace-actions button { flex: 1; }
 }
