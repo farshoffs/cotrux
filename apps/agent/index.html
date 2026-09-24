@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws: wss:; style-src 'self'; img-src 'self' data:; media-src 'self' blob:;" />
+  <title>Cotrux</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div class="brand">
+        <div class="brand-mark">C</div>
+        <div>
+          <strong>Cotrux</strong>
+          <span>Desktop agent</span>
+        </div>
+      </div>
+      <div id="statePill" class="pill" data-state="idle"><span></span><b id="stateText">Starting</b></div>
+    </header>
+
+    <section class="pin-card">
+      <span class="eyebrow">YOUR CONNECTION PIN</span>
+      <div id="pin" class="pin">------</div>
+      <p>Share this PIN only with the device you want to use. You still approve every incoming session.</p>
+      <div class="pin-actions">
+        <button id="newPinBtn" class="ghost">New PIN</button>
+        <button id="copyPinBtn" class="ghost">Copy PIN</button>
+      </div>
+    </section>
+
+    <section id="requestCard" class="request-card hidden">
+      <div class="request-icon">↗</div>
+      <div>
+        <span class="eyebrow">REMOTE ACCESS REQUEST</span>
+        <h2 id="requestName">Cotrux controller</h2>
+        <p>This device is asking to see and control your primary screen.</p>
+      </div>
+      <div class="request-actions">
+        <button id="rejectBtn" class="ghost">Reject</button>
+        <button id="acceptBtn" class="primary">Allow session</button>
+      </div>
+    </section>
+
+    <section id="sessionCard" class="session-card hidden">
+      <div class="live-row">
+        <div>
+          <span class="eyebrow">SESSION ACTIVE</span>
+          <h2>Remote control is on</h2>
+          <p>Your primary display is being shared. Mouse, keyboard and clipboard commands can be received.</p>
+        </div>
+        <span class="live-badge">LIVE</span>
+      </div>
+      <div class="preview-wrap">
+        <video id="preview" autoplay muted playsinline></video>
+      </div>
+      <button id="stopBtn" class="danger">Stop remote session</button>
+    </section>
+
+    <section class="settings">
+      <div class="section-head">
+        <div>
+          <span class="eyebrow">NETWORK</span>
+          <h2>Signaling service</h2>
+        </div>
+      </div>
+      <label for="signalUrl">WebSocket URL</label>
+      <div class="inline">
+        <input id="signalUrl" spellcheck="false" placeholder="ws://localhost:8787/ws" />
+        <button id="reconnectBtn" class="ghost">Reconnect</button>
+      </div>
+
+      <details>
+        <summary>TURN / advanced</summary>
+        <div class="details-grid">
+          <label for="turnUrl">TURN URL</label>
+          <input id="turnUrl" spellcheck="false" placeholder="turn:turn.example.com:3478" />
+          <label for="turnUser">TURN username</label>
+          <input id="turnUser" />
+          <label for="turnPass">TURN credential</label>
+          <input id="turnPass" type="password" />
+          <button id="saveAdvancedBtn" class="ghost">Save network settings</button>
+        </div>
+      </details>
+    </section>
+
+    <footer>
+      Cotrux never starts a session without approval in this MVP.
+    </footer>
+  </main>
+
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>
