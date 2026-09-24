@@ -1,0 +1,30 @@
+name: Validate Cotrux
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Syntax check
+        run: |
+          node --check services/signal/server.js
+          node --check apps/controller/app.js
+          node --check apps/controller/build.mjs
+          node --check apps/agent/main.js
+          node --check apps/agent/preload.js
+          node --check apps/agent/renderer.js
+      - name: Build PWA
+        run: npm run build:controller
