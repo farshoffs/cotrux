@@ -1,6 +1,6 @@
 {
   "name": "@cotrux/agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "main.js",
@@ -48,8 +48,14 @@
       ],
       "category": "Utility"
     },
-    "executableName": "Cotrux"
+    "executableName": "Cotrux",
+    "extraResources": [
+      {
+        "from": "hyperv-manager.ps1",
+        "to": "hyperv-manager.ps1"
+      }
+    ]
   },
-  "description": "Cotrux remote desktop host agent with optional trusted unattended access",
+  "description": "Cotrux remote desktop host with trusted unattended access and persistent Hyper-V workspaces",
   "author": "Cotrux"
 }
