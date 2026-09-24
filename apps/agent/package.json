@@ -39,8 +39,12 @@
       "target": [
         "AppImage"
       ],
-      "category": "Utility"
-    }
+      "category": "Utility",
+      "executableName": "Cotrux",
+      "desktopName": "Cotrux",
+      "syncDesktopName": true
+    },
+    "executableName": "Cotrux"
   },
   "description": "Cotrux consent-first remote desktop host agent",
   "author": "Cotrux"
