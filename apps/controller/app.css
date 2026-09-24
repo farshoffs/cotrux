@@ -164,6 +164,7 @@ body.remote-active .shell { display: none; }
   outline: none;
   background: #010203;
   touch-action: none;
+  overscroll-behavior: none;
 }
 .video-surface {
   position: absolute;
@@ -288,6 +289,7 @@ body.remote-active .shell { display: none; }
 
 .session-dock {
   position: absolute;
+  touch-action: manipulation;
   z-index: 22;
   left: 50%;
   bottom: max(10px, env(safe-area-inset-bottom));
@@ -307,6 +309,50 @@ body.remote-active .shell { display: none; }
   scrollbar-width: none;
 }
 .session-dock::-webkit-scrollbar { display: none; }
+.immersive-restore {
+  position: absolute;
+  z-index: 45;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  width: 44px;
+  height: 44px;
+  display: none;
+  place-items: center;
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(9,11,16,.72);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 10px 34px rgba(0,0,0,.36);
+}
+.remote-controls-hidden .session-topbar,
+.remote-controls-hidden .session-dock,
+.remote-controls-hidden .zoom-hud,
+.remote-controls-hidden .mode-badge,
+.remote-controls-hidden .control-drawer {
+  display: none !important;
+}
+.remote-controls-hidden .immersive-restore,
+.remote-immersive .immersive-restore {
+  display: grid;
+}
+.remote-controls-hidden .remote-stage,
+.remote-immersive .remote-stage {
+  inset: 0;
+}
+.remote-immersive {
+  overflow: hidden;
+  background: #000;
+}
+.remote-immersive .remote-session {
+  background: #000;
+}
+
 .dock-button {
   flex: 0 0 auto;
   min-width: 58px;

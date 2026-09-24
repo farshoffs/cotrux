@@ -27,6 +27,7 @@ const els = {
   fullscreenBtn: $("#fullscreenBtn"),
   orientationBtn: $("#orientationBtn"),
   stopBtn: $("#stopBtn"),
+  immersiveRestoreBtn: $("#immersiveRestoreBtn"),
 
   zoomHud: $("#zoomHud"),
   zoomOutBtn: $("#zoomOutBtn"),
@@ -43,6 +44,7 @@ const els = {
   shortcutsBtn: $("#shortcutsBtn"),
   viewBtn: $("#viewBtn"),
   clipboardBtn: $("#clipboardBtn"),
+  hideControlsBtn: $("#hideControlsBtn"),
 
   controlDrawer: $("#controlDrawer"),
   drawerTitle: $("#drawerTitle"),
@@ -73,6 +75,8 @@ let currentConnection = null;
 let pointerMoveFrame = 0;
 let drawerName = "";
 let interactionMode = "direct";
+let controlsHidden = false;
+let immersiveMode = false;
 let remoteCursor = { x: 0.5, y: 0.5 };
 let view = { zoom: 1, panX: 0, panY: 0, fitWidth: 16, fitHeight: 9 };
 const activePointers = new Map();
@@ -304,7 +308,9 @@ function teardownPeer() {
 
 function exitRemoteUi() {
   closeDrawer();
-  document.body.classList.remove("remote-active");
+  immersiveMode = false;
+  controlsHidden = false;
+  document.body.classList.remove("remote-active", "remote-immersive", "remote-controls-hidden");
   els.remoteView.classList.add("hidden");
   if (location.hash === "#remote") {
     history.replaceState(null, "", location.pathname + location.search);
@@ -654,6 +660,38 @@ function videoPoint(clientX, clientY) {
 }
 
 /* Interaction modes */
+function setControlsHidden(hidden) {
+  controlsHidden = Boolean(hidden);
+  document.body.classList.toggle("remote-controls-hidden", controlsHidden);
+  if (controlsHidden) closeDrawer();
+  requestAnimationFrame(updateVideoGeometry);
+}
+
+async function setImmersiveMode(enabled) {
+  immersiveMode = Boolean(enabled);
+  document.body.classList.toggle("remote-immersive", immersiveMode);
+  setControlsHidden(immersiveMode || controlsHidden);
+
+  if (immersiveMode) {
+    const target = document.documentElement.requestFullscreen
+      ? document.documentElement
+      : els.remoteView.requestFullscreen
+        ? els.remoteView
+        : null;
+    try {
+      if (target && !document.fullscreenElement) await target.requestFullscreen();
+    } catch {}
+  } else {
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+    } catch {}
+    document.body.classList.remove("remote-controls-hidden");
+    controlsHidden = false;
+  }
+
+  setTimeout(updateVideoGeometry, 80);
+}
+
 function setInteractionMode(mode) {
   if (!["direct", "trackpad", "pan"].includes(mode)) return;
   interactionMode = mode;
@@ -665,7 +703,13 @@ function setInteractionMode(mode) {
   els.modeBtnLabel.textContent = labels[mode][0];
   els.modeBadge.textContent = labels[mode][1];
   els.modeBtn.querySelector(".dock-icon").textContent = labels[mode][2];
-  $$(".interaction-option").forEach(button => button.classList.toggle("active", button.dataset.mode === mode));
+  $(".interaction-option").forEach(button => button.classList.toggle("active", button.dataset.mode === mode));
+
+  if (mode === "trackpad") {
+    setTimeout(() => {
+      if (interactionMode === "trackpad" && sessionActive && !drawerName) setControlsHidden(true);
+    }, 220);
+  }
 }
 
 function cycleInteractionMode() {
@@ -1118,6 +1162,22 @@ els.centerViewBtn.addEventListener("click", () => {
   applyViewTransform();
 });
 
+els.hideControlsBtn.addEventListener("click", () => setControlsHidden(true));
+els.immersiveRestoreBtn.addEventListener("click", async () => {
+  if (immersiveMode) await setImmersiveMode(false);
+  else setControlsHidden(false);
+});
+
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && immersiveMode) {
+    immersiveMode = false;
+    document.body.classList.remove("remote-immersive");
+    document.body.classList.remove("remote-controls-hidden");
+    controlsHidden = false;
+    requestAnimationFrame(updateVideoGeometry);
+  }
+});
+
 els.clipboardBtn.addEventListener("click", async () => {
   let text = "";
   try {
@@ -1133,11 +1193,7 @@ els.clipboardBtn.addEventListener("click", async () => {
 });
 
 els.fullscreenBtn.addEventListener("click", async () => {
-  try {
-    if (!document.fullscreenElement) await els.remoteView.requestFullscreen();
-    else await document.exitFullscreen();
-    setTimeout(updateVideoGeometry, 100);
-  } catch {}
+  await setImmersiveMode(!immersiveMode);
 });
 
 els.orientationBtn.addEventListener("click", async () => {
