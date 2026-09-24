@@ -195,7 +195,7 @@ async function runHyperVHelper(action, extra = {}) {
   try {
     await execFileAsync("powershell.exe", args, {
       windowsHide: true,
-      timeout: action === "create" || action === "enable" || action === "provision"
+      timeout: action === "create" || action === "enable" || action === "provision" || action === "prepare-bootstrap"
         ? 15 * 60 * 1000
         : 90 * 1000,
       encoding: "utf8",
