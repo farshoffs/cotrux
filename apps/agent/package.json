@@ -39,10 +39,7 @@
       "target": [
         "AppImage"
       ],
-      "category": "Utility",
-      "executableName": "Cotrux",
-      "desktopName": "Cotrux",
-      "syncDesktopName": true
+      "category": "Utility"
     },
     "executableName": "Cotrux"
   },
