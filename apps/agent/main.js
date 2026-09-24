@@ -283,17 +283,64 @@ async function enableHyperV() {
 async function chooseWorkspaceIso() {
   if (process.platform !== "win32") return getBackgroundWorkspaceStatus();
   const selected = await dialog.showOpenDialog(mainWindow, {
-    title: "Choose Windows ISO for Cotrux Persistent Workspace",
-    buttonLabel: "Use this ISO",
+    title: "Choose x64 Windows ISO for Cotrux Persistent Workspace",
+    buttonLabel: "Validate & Use ISO",
     properties: ["openFile"],
     filters: [{ name: "Windows ISO", extensions: ["iso"] }]
   });
+
   if (!selected.canceled && selected.filePaths[0]) {
+    const candidate = selected.filePaths[0];
+    const validation = await runHyperVHelper("validate-iso", { isoPath: candidate });
+    if (!validation.ok) {
+      return {
+        ...(await getBackgroundWorkspaceStatus()),
+        isoValidation: validation,
+        error: validation.error || "This ISO cannot boot the Cotrux workspace."
+      };
+    }
+
     const state = ensureWorkspaceState();
-    state.isoPath = selected.filePaths[0];
+    state.isoPath = candidate;
     writeJsonFile(workspaceStatePath(), state);
   }
+
   return getBackgroundWorkspaceStatus();
+}
+
+async function repairWorkspaceBoot() {
+  if (process.platform !== "win32") return getBackgroundWorkspaceStatus();
+
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: "Replace Windows ISO and Repair Workspace Boot",
+    buttonLabel: "Repair Boot",
+    properties: ["openFile"],
+    filters: [{ name: "Windows ISO", extensions: ["iso"] }]
+  });
+
+  if (selected.canceled || !selected.filePaths[0]) return getBackgroundWorkspaceStatus();
+
+  const candidate = selected.filePaths[0];
+  const validation = await runHyperVHelper("validate-iso", { isoPath: candidate });
+  if (!validation.ok) {
+    return {
+      ...(await getBackgroundWorkspaceStatus()),
+      isoValidation: validation,
+      error: validation.error || "This ISO cannot boot the Cotrux workspace."
+    };
+  }
+
+  const state = ensureWorkspaceState();
+  state.isoPath = candidate;
+  writeJsonFile(workspaceStatePath(), state);
+
+  const result = await runHyperVHelper("repair-boot", { isoPath: candidate });
+  const updated = await getBackgroundWorkspaceStatus();
+  return {
+    ...updated,
+    repairResult: result,
+    error: result.ok ? "" : (result.error || "Workspace boot repair failed.")
+  };
 }
 
 async function startBackgroundWorkspace() {
@@ -652,6 +699,7 @@ app.whenReady().then(() => {
   ipcMain.handle("cotrux:workspace-connect", connectBackgroundWorkspace);
   ipcMain.handle("cotrux:workspace-enable-hyperv", enableHyperV);
   ipcMain.handle("cotrux:workspace-choose-iso", chooseWorkspaceIso);
+  ipcMain.handle("cotrux:workspace-repair-boot", repairWorkspaceBoot);
   ipcMain.handle("cotrux:workspace-download-windows", openWindowsDownload);
   ipcMain.handle("cotrux:workspace-provision", (_event, credentials) => provisionWorkspaceGuest(credentials));
   ipcMain.handle("cotrux:workspace-prepare-bootstrap", prepareWorkspaceGuestBootstrap);
