@@ -33,7 +33,12 @@ let pointerMoveTimer = 0;
 let sessionActive = false;
 
 const saved = JSON.parse(localStorage.getItem("cotrux.controller.settings") || "{}");
-els.signalUrl.value = saved.signalUrl || (location.hostname === "localhost" ? "ws://localhost:8787/ws" : "");
+const isGitHubPages = location.hostname.endsWith(".github.io");
+const sameOriginSignal =
+  !isGitHubPages && (location.protocol === "http:" || location.protocol === "https:")
+    ? (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws"
+    : "ws://localhost:8787/ws";
+els.signalUrl.value = saved.signalUrl || sameOriginSignal;
 els.turnUrl.value = saved.turnUrl || "";
 els.turnUser.value = saved.turnUser || "";
 els.turnPass.value = saved.turnPass || "";
