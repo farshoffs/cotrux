@@ -1,0 +1,8 @@
+{
+  "appId": "com.cotrux.controller",
+  "appName": "Cotrux",
+  "webDir": "dist",
+  "server": {
+    "iosScheme": "https"
+  }
+}
