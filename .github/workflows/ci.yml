@@ -26,5 +26,7 @@ jobs:
           node --check apps/agent/main.js
           node --check apps/agent/preload.js
           node --check apps/agent/renderer.js
+      - name: Test signaling
+        run: npm run test:signal
       - name: Build PWA
         run: npm run build:controller
