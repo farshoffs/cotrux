@@ -34,10 +34,13 @@ let sessionActive = false;
 
 const saved = JSON.parse(localStorage.getItem("cotrux.controller.settings") || "{}");
 const isGitHubPages = location.hostname.endsWith(".github.io");
+const isLocalDev = ["localhost", "127.0.0.1"].includes(location.hostname);
 const sameOriginSignal =
   !isGitHubPages && (location.protocol === "http:" || location.protocol === "https:")
     ? (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws"
-    : "ws://localhost:8787/ws";
+    : isLocalDev
+      ? "ws://localhost:8787/ws"
+      : "";
 els.signalUrl.value = saved.signalUrl || sameOriginSignal;
 els.turnUrl.value = saved.turnUrl || "";
 els.turnUser.value = saved.turnUser || "";
