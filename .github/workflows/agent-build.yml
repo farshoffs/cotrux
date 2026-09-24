@@ -3,6 +3,11 @@ name: Build Cotrux Desktop Agent
 on:
   workflow_dispatch:
   push:
+    branches: ["main"]
+    paths:
+      - "apps/agent/**"
+      - "package.json"
+      - ".github/workflows/agent-build.yml"
     tags:
       - "v*"
 
