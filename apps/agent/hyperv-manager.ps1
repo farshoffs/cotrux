@@ -131,9 +131,10 @@ try {
 
     $vhdDir = Split-Path -Parent $VhdPath
     New-Item -ItemType Directory -Path $vhdDir -Force | Out-Null
-    if (Test-Path $VhdPath) { throw "A VHDX already exists at the workspace path. Cotrux will not overwrite it." }
 
-    New-VHD -Path $VhdPath -Dynamic -SizeBytes 100GB | Out-Null
+    if (-not (Test-Path $VhdPath)) {
+      New-VHD -Path $VhdPath -Dynamic -SizeBytes 100GB | Out-Null
+    }
 
     $switch = Get-VMSwitch -Name "Default Switch" -ErrorAction SilentlyContinue
     if (-not $switch) {
