@@ -175,20 +175,37 @@ The `Validate Cotrux` GitHub Actions workflow performs:
       workflows/     CI, installer builds, optional Pages deploy
 
 
-## Background Workspace
 
-Cotrux can run a second, isolated Windows desktop while the person at the physical PC keeps using their normal desktop. In the desktop GUI choose **Start Background Workspace**. Cotrux launches a Windows Sandbox session in the background, starts a second Cotrux agent inside it, and gives the workspace its own pairing PIN and trusted-device identity.
+## Persistent Workspace
 
-The remote controller sees the workspace as a separate computer. After the first trusted pairing, it can be opened again without a PIN while the workspace is running. Remote mouse and keyboard events stay inside the sandbox and do not move the physical user's pointer.
+Cotrux Persistent Workspace is a real Hyper-V virtual machine rather than a disposable Windows Sandbox. The physical user can continue using the host desktop while the VM runs as an independent Windows computer with its own display, mouse, keyboard, applications and Cotrux identity.
 
-Current requirements:
+The desktop GUI handles the lifecycle:
 
-- Windows 11 24H2 or newer.
-- Windows Sandbox enabled.
-- A supported Windows edition (Pro, Enterprise, Education, or equivalent Sandbox-capable edition).
-- Hardware virtualization available.
-- One Background Workspace at a time because Windows Sandbox currently supports one running instance.
+1. Enable Hyper-V from Cotrux. Windows may show a UAC approval prompt and may require one restart.
+2. Choose a Windows installation ISO in the file picker.
+3. Select **Create Persistent Workspace**.
+4. Cotrux creates a Generation 2 VM with a dynamic 100 GB VHDX, virtual TPM, Secure Boot and networking.
+5. Finish the one-time Windows installation in **Open locally**.
+6. Install Cotrux inside that VM, enable **Unattended Access**, and enable **Start Cotrux with this computer** inside the VM.
+7. Pair that VM once from the PWA. It then appears as a separate trusted computer.
 
-The desktop GUI checks support automatically and can open **Windows Features** for setup. No manual terminal or CMD commands are required.
+Persistence behavior:
 
-For isolation, Cotrux disables clipboard, printer, microphone, and camera redirection for the background workspace. It maps only the installed Cotrux application read-only plus a dedicated Cotrux workspace-data folder. The sandbox itself is disposable; Cotrux trust/config data persists only in that dedicated mapped folder.
+- The VHDX is never deleted by Cotrux.
+- **Save & stop** saves the VM state instead of deleting or resetting it.
+- Hyper-V is configured with **AutomaticStartAction = Start**.
+- Hyper-V is configured with **AutomaticStopAction = Save** so host shutdown preserves the guest session.
+- Installed applications, Windows configuration and files remain on the persistent VHDX.
+- Cotrux intentionally provides no delete-workspace button.
+- A Windows guest license/activation is separate from Cotrux.
+
+Current host requirements are Windows Pro/Enterprise/Education-class Hyper-V support, hardware virtualization with SLAT, and enough memory for both the host and VM. Windows 11 guests use Generation 2, Secure Boot and virtual TPM settings.
+
+## Stable Windows download
+
+The desktop build workflow publishes a fixed latest Windows installer asset:
+
+    https://github.com/farshoffs/cotrux/releases/download/desktop-latest/Cotrux-Setup.exe
+
+The GitHub Pages controller exposes this as **Download Cotrux for Windows**. Each successful main-branch desktop build replaces the `desktop-latest` release so the button stays current.
