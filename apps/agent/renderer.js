@@ -229,8 +229,8 @@ async function createPeer() {
   return pc;
 }
 
-async function startSession() {
-  await createPeer();
+async function prepareCapture() {
+  if (captureStream?.active) return captureStream;
 
   captureStream = await navigator.mediaDevices.getDisplayMedia({
     video: {
@@ -241,6 +241,12 @@ async function startSession() {
 
   captureStream.getVideoTracks()[0]?.addEventListener("ended", () => stopSession(true));
   els.preview.srcObject = captureStream;
+  return captureStream;
+}
+
+async function startSession() {
+  await createPeer();
+  await prepareCapture();
 
   for (const track of captureStream.getTracks()) {
     pc.addTrack(track, captureStream);
@@ -305,9 +311,25 @@ function stopSession(notify = true) {
   registerHost();
 }
 
-els.acceptBtn.addEventListener("click", () => {
+els.acceptBtn.addEventListener("click", async () => {
   if (!pendingRequestId) return;
-  sendWs({ type: "host-accept", requestId: pendingRequestId });
+
+  const requestId = pendingRequestId;
+  els.acceptBtn.disabled = true;
+  setState("Preparing share", "pending");
+
+  try {
+    await prepareCapture();
+    sendWs({ type: "host-accept", requestId });
+  } catch (error) {
+    console.error("Screen capture cancelled", error);
+    sendWs({ type: "host-reject", requestId });
+    pendingRequestId = "";
+    els.requestCard.classList.add("hidden");
+    setState("Ready", "ready");
+  } finally {
+    els.acceptBtn.disabled = false;
+  }
 });
 
 els.rejectBtn.addEventListener("click", () => {
@@ -321,7 +343,7 @@ els.rejectBtn.addEventListener("click", () => {
 els.stopBtn.addEventListener("click", () => stopSession(true));
 els.newPinBtn.addEventListener("click", newPin);
 els.copyPinBtn.addEventListener("click", async () => {
-  await navigator.clipboard.writeText(currentPin);
+  await window.cotrux.control({ kind: "clipboard", text: currentPin });
   setState("PIN copied", "ready");
 });
 els.reconnectBtn.addEventListener("click", connectSignal);
